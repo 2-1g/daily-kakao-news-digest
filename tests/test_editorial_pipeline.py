@@ -47,9 +47,14 @@ def item(index, *, headline=None, fact=None, url=None):
         "E1", fact or f"검증된 사실 {index}", f"source-{index}.kr",
         url or f"https://source-{index}.kr/a/{index}",
     )
+    corroboration = Evidence(
+        "E2", fact or f"검증된 사실 {index}", f"wire-{index}.kr",
+        f"https://wire-{index}.kr/a/{index}",
+    )
     return DigestItem(
         str(index), headline or f"주요 뉴스 {index}",
-        (GroundedClause(fact or f"검증된 사실 {index}", ("E1",)),), (evidence,),
+        (GroundedClause(fact or f"검증된 사실 {index}", ("E1", "E2")),),
+        (evidence, corroboration),
         "economy", "domestic", index % 2 == 0,
     )
 
@@ -141,9 +146,9 @@ class RankingTests(unittest.TestCase):
         filler = cluster("filler", "b.kr", score="0", category="sports",
                          region="domestic", investment=True, hours=100)
         selected = rank_clusters((strong, filler), NOW, RankConfig(minimum_score=.4))
-        self.assertEqual((strong,), selected)
+        self.assertEqual((), selected)
 
-    def test_quiet_normal_and_major_days_adapt_without_padding(self):
+    def test_single_publisher_day_is_suppressed_while_other_days_adapt(self):
         quiet = rank_clusters((cluster("q", "q.kr"),), NOW, RankConfig(minimum_score=0, max_items=10))
         normal = rank_clusters(
             tuple(cluster(f"n{i}", f"n{i}.kr") for i in range(5)), NOW,
@@ -153,7 +158,7 @@ class RankingTests(unittest.TestCase):
             tuple(cluster(f"m{i}", f"m{i}.kr") for i in range(20)), NOW,
             RankConfig(minimum_score=0, max_items=10),
         )
-        self.assertEqual((1, 5, 10), (len(quiet), len(normal), len(major)))
+        self.assertEqual((0, 5, 10), (len(quiet), len(normal), len(major)))
 
     def test_multi_publisher_pool_cannot_emit_single_publisher_digest(self):
         dominant = cluster("dominant", "one.kr", score="1")
@@ -166,6 +171,7 @@ class RankingTests(unittest.TestCase):
         one = cluster("one", "one.kr", region="domestic", investment=True)
         quiet = editorial_metrics((one,), approved_publishers=("one.kr",))
         self.assertTrue(quiet.insufficient_source_diversity)
+        self.assertEqual("insufficient_diversity", quiet.reason)
         self.assertEqual((1.0, 1.0, 1.0),
                          (quiet.max_publisher_share, quiet.domestic_share, quiet.investment_share))
         diverse = editorial_metrics((one, cluster("two", "two.kr", region="overseas")),
@@ -257,6 +263,9 @@ class GroundingTests(unittest.TestCase):
 
 class KakaoCompositionTests(unittest.TestCase):
     def assert_contract(self, composed):
+        if not composed.messages:
+            self.assertIn(composed.reason, {"no_qualifying_news", "insufficient_diversity"})
+            return
         self.assertLessEqual(len(composed.messages), 18)
         self.assertTrue(all(len(message) <= 200 for message in composed.messages))
         self.assertLessEqual(composed.total_chars, 4000)
@@ -317,10 +326,14 @@ class KakaoCompositionTests(unittest.TestCase):
         self.assertIn("b.kr · https://b.kr/y", digest.messages[1])
         self.assertFalse(digest.insufficient_source_diversity)
 
-    def test_quiet_day_single_source_is_explicit(self):
-        digest = DigestComposer().compose((item(1),))
+    def test_single_source_digest_is_suppressed(self):
+        evidence = Evidence("E1", "검증된 사실", "only.kr", "https://only.kr/1")
+        single = DigestItem("one", "뉴스", (GroundedClause("검증된 사실", ("E1",)),),
+                            (evidence,))
+        digest = DigestComposer().compose((single,))
         self.assertTrue(digest.insufficient_source_diversity)
-        self.assertIn("독립 출처가 부족", digest.messages[0])
+        self.assertEqual("insufficient_diversity", digest.reason)
+        self.assertEqual((), digest.messages)
 
 
 if __name__ == "__main__":

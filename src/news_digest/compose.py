@@ -15,6 +15,7 @@ DISCLAIMER = "※ 정보 제공용이며 투자 권유가 아닙니다."
 class ComposedDigest:
     messages: tuple[str, ...]
     insufficient_source_diversity: bool = False
+    reason: str | None = None
 
     @property
     def total_chars(self) -> int:
@@ -27,11 +28,13 @@ class DigestComposer:
 
     def compose(self, items: Iterable[DigestItem], edition: str = "오늘") -> ComposedDigest:
         items = tuple(items)
+        if not items:
+            return ComposedDigest((), False, "no_qualifying_news")
         bodies = ["📰 %s 주요 뉴스" % edition]
         all_publishers = {source.publisher for item in items for source in item.sources}
         insufficient = bool(items) and len(all_publishers) < 2
         if insufficient:
-            bodies[0] += "\n※ 오늘은 확인 가능한 독립 출처가 부족합니다."
+            return ComposedDigest((), True, "insufficient_diversity")
         for item in items:
             facts = " ".join(("[분석] " if c.analysis else "") + c.text for c in item.clauses)
             cited_ids = {evidence_id for clause in item.clauses for evidence_id in clause.evidence_ids}
@@ -51,7 +54,7 @@ class DigestComposer:
                 raise ValueError("mandatory message exceeds Kakao limit")
             bodies.pop(oversize)
             numbered = self._number(bodies)
-        return ComposedDigest(tuple(numbered), insufficient)
+        return ComposedDigest(tuple(numbered), False, None)
 
     def _fit_item(self, headline: str, facts: str,
                   sources: Sequence[Evidence]) -> str | None:

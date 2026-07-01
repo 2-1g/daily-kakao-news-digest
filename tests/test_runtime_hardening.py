@@ -2,6 +2,7 @@ import unittest
 import io
 import json
 import logging
+from unittest import mock
 from datetime import date, datetime, timedelta, timezone
 
 from news_digest.auth import InMemoryTokenStore, OAuthManager, OAuthToken
@@ -45,6 +46,28 @@ class RuntimeHardeningTests(unittest.TestCase):
                              KakaoClient(Transport()), clock)
         self.assertEqual("acknowledged", app.run("worker-1", ["one"]).status)
 
+    def test_insufficient_diversity_suppresses_without_auth_or_kakao_send(self):
+        events = []
+
+        class NoSendTransport:
+            def send_self_message(self, access_token, text):
+                raise AssertionError("suppressed edition must not reach Kakao")
+
+        class NoAuthStore:
+            def current(self):
+                raise AssertionError("suppressed edition must not load OAuth tokens")
+
+        app = DigestPipeline(
+            InMemoryEditionStore(), OAuthManager(NoAuthStore(), Refresher()),
+            KakaoClient(NoSendTransport()), lambda: NOW,
+            lambda event, **fields: events.append((event, fields)),
+        )
+        result = app.run("worker-1", [])
+        self.assertEqual(("suppressed", "insufficient_diversity", 0),
+                         (result.status, result.reason, result.sent))
+        self.assertEqual("digest_run_suppressed", events[-1][0])
+        self.assertEqual("insufficient_diversity", events[-1][1]["reason"])
+
     def test_definite_rejection_is_durable_failed_not_unknown(self):
         store, tokens = InMemoryEditionStore(), self.token_store()
 
@@ -86,7 +109,7 @@ class RuntimeHardeningTests(unittest.TestCase):
     def test_production_logger_emits_info_once_without_propagation(self):
         logger = logging.getLogger("news_digest.test.production")
         logger.handlers.clear()
-        with unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as output:
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as output:
             configure_production_logging(logger)
             configure_production_logging(logger)
             log_event(logger, "runtime_ready", access_token="secret", count=1)

@@ -16,6 +16,7 @@ class RunResult:
     status: str
     sent: int = 0
     content_hash: str = ""
+    reason: str = ""
 
 
 class DigestPipeline:
@@ -38,6 +39,11 @@ class DigestPipeline:
         if edition.delivery_started_at is None and not edition_window_open(now):
             self.store.mark_missed(run_date, owner)
             return RunResult("missed")
+        if not messages:
+            self.event_sink("digest_run_suppressed", status="suppressed",
+                            edition_id=edition.edition_id,
+                            reason="insufficient_diversity", message_count=0)
+            return RunResult("suppressed", reason="insufficient_diversity")
         envelopes = validate_messages(messages)
         self.store.heartbeat(run_date, owner, self.clock(), self.stage_lease_ttl)
         digest = self.store.freeze(run_date, owner, [item.text for item in envelopes])

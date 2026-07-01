@@ -52,7 +52,9 @@ def collect_and_compose(emit=None) -> List[str]:
         raise RuntimeError("no compliant source adapter configured")
     today = datetime.now(timezone.utc).date()
     articles = [article for adapter in adapters for article in adapter.collect(today)]
-    clusters = rank_clusters(cluster_articles(articles))
+    eligible_clusters = cluster_articles(articles)
+    eligible_publishers = {cluster.primary.publisher for cluster in eligible_clusters}
+    clusters = rank_clusters(eligible_clusters)
     if os.environ.get("MODEL_SUMMARIZER_ENABLED", "false").lower() == "true":
         summarizer = BudgetedModelSummarizer(
             OpenAIResponsesClient(_env("MODEL_API_KEY")),
@@ -65,7 +67,7 @@ def collect_and_compose(emit=None) -> List[str]:
     else:
         items = [summarize(cluster) for cluster in clusters]
     if emit is not None:
-        metrics = rank_editorial_metrics(clusters)
+        metrics = rank_editorial_metrics(clusters, eligible_publishers)
         supported = sum(bool(item.sources) and all(clause.evidence_ids for clause in item.clauses)
                         for item in items)
         emit("digest_editorial_metrics", source_concentration=metrics.max_publisher_share,
@@ -73,8 +75,15 @@ def collect_and_compose(emit=None) -> List[str]:
              domestic_ratio=metrics.domestic_share,
              investment_ratio=metrics.investment_share,
              source_count=metrics.publisher_count, item_count=metrics.item_count,
+             available_source_count=len(eligible_publishers),
+             insufficient_diversity=metrics.insufficient_source_diversity,
+             reason=metrics.reason,
              estimated_cost_ceiling_usd=os.environ.get("MODEL_MAX_RUN_USD", "0.10"))
-    return list(DigestComposer().compose(items, today.isoformat()).messages)
+    composed = DigestComposer().compose(items, today.isoformat())
+    if composed.insufficient_source_diversity and emit is not None:
+        emit("digest_editorial_suppressed", status="suppressed",
+             reason=composed.reason, message_count=0)
+    return list(composed.messages)
 
 
 def run_cloud() -> int:
@@ -115,7 +124,7 @@ def run_cloud() -> int:
          message_count=len(messages), character_count=sum(map(len, messages)),
          estimated_cost_usd=os.environ.get("NEWS_DIGEST_ESTIMATED_COST_USD", "unknown"))
     print(json.dumps(result.__dict__, ensure_ascii=False, sort_keys=True))
-    return 0 if result.status in ("dry_run", "acknowledged", "missed") else 2
+    return 0 if result.status in ("dry_run", "acknowledged", "missed", "suppressed") else 2
 
 
 def _read_messages(path: Path) -> List[str]:

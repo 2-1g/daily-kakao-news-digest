@@ -26,6 +26,7 @@ class EditorialMetrics:
     domestic_share: float
     investment_share: float
     insufficient_source_diversity: bool
+    reason: str | None = None
 
 
 def editorial_metrics(selected: Iterable[EventCluster], approved_publishers: Iterable[str] = ()) -> EditorialMetrics:
@@ -34,11 +35,12 @@ def editorial_metrics(selected: Iterable[EventCluster], approved_publishers: Ite
               for publisher in {c.primary.publisher for c in items}}
     total = len(items)
     approved = set(approved_publishers)
+    insufficient = len(approved) < 2 if approved else (bool(items) and len(counts) < 2)
     return EditorialMetrics(
         total, len(counts), max(counts.values(), default=0) / total if total else 0.0,
         sum(c.region == "domestic" for c in items) / total if total else 0.0,
         sum(c.investment_relevance for c in items) / total if total else 0.0,
-        bool(items) and len(counts) == 1 and len(approved) < 2,
+        insufficient, "insufficient_diversity" if insufficient else None,
     )
 
 
@@ -64,8 +66,9 @@ def rank_clusters(clusters: Iterable[EventCluster], now: datetime | None = None,
             continue
         chosen.append(cluster)
         publisher_counts[publisher] = projected
-    # A multi-source pool must never silently become a single-publisher edition.
-    if len(eligible_publishers) > 1 and len({c.primary.publisher for c in chosen}) < 2:
+    # Never publish an edition that cannot demonstrate publisher diversity.
+    if chosen and (len(eligible_publishers) < 2 or
+                   len({c.primary.publisher for c in chosen}) < 2):
         return ()
     return tuple(chosen)
 
