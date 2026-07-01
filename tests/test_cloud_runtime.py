@@ -52,6 +52,7 @@ class SecretClient:
 class Document:
     def __init__(self):
         self.value = None
+        self.generation = 0
 
     def get(self):
         return SimpleNamespace(exists=self.value is not None,
@@ -60,6 +61,7 @@ class Document:
     def set(self, value):
         # Simulate the serialization boundary rather than retaining object aliases.
         self.value = json.loads(json.dumps(value))
+        self.generation += 1
 
 
 class FirestoreClient:
@@ -73,6 +75,27 @@ class FirestoreClient:
             def document(self, key):
                 return client.documents.setdefault((name, key), Document())
         return Collection()
+
+
+class AtomicRunner:
+    """Injected stand-in for a Firestore transaction with generation checks."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, document, run_date, mutation, adapter):
+        self.calls += 1
+        observed = document.generation
+        local = __import__("news_digest.state", fromlist=["InMemoryEditionStore"]).InMemoryEditionStore()
+        snapshot = document.get()
+        if snapshot.exists:
+            local._editions[run_date] = edition_from_dict(snapshot.to_dict())
+        result = mutation(local)
+        if document.generation != observed:
+            raise StateConflict("stale transaction rejected")
+        document.set(edition_to_dict(local._editions[run_date]))
+        adapter._editions[run_date] = local._editions[run_date]
+        return result
 
 
 class CloudPersistenceTests(unittest.TestCase):
@@ -102,9 +125,9 @@ class CloudPersistenceTests(unittest.TestCase):
         self.assertEqual("1", store.active_version())
 
     def test_edition_serialization_round_trip_preserves_frozen_delivery_state(self):
-        edition = Edition(DAY, "owner", NOW + timedelta(minutes=5))
-        store = FirestoreEditionStore("project", client=FirestoreClient())
-        store._editions[DAY] = edition
+        store = FirestoreEditionStore("project", client=FirestoreClient(),
+                                      transaction_runner=AtomicRunner())
+        store.acquire(DAY, "owner", NOW)
         store.freeze(DAY, "owner", ["one", "two"])
         store.begin(DAY, "owner", 1, NOW)
         store.resolve(DAY, "owner", 1, DeliveryStatus.UNKNOWN, NOW)
@@ -115,16 +138,105 @@ class CloudPersistenceTests(unittest.TestCase):
 
     def test_firestore_second_process_recovers_document_and_enforces_lease(self):
         client = FirestoreClient()
-        first = FirestoreEditionStore("project", client=client)
+        runner = AtomicRunner()
+        first = FirestoreEditionStore("project", client=client, transaction_runner=runner)
         first.acquire(DAY, "one", NOW)
         first.freeze(DAY, "one", ["message"])
         first.begin(DAY, "one", 1, NOW)
-        second = FirestoreEditionStore("project", client=client)
+        second = FirestoreEditionStore("project", client=client, transaction_runner=runner)
         with self.assertRaises(StateConflict):
             second.acquire(DAY, "two", NOW + timedelta(hours=1))
         self.assertEqual(1, second.recover_stale_pending(DAY, NOW + timedelta(minutes=6)))
         self.assertEqual("unknown", client.documents[("news_digest_editions", DAY.isoformat())]
                          .value["deliveries"]["1"]["status"])
+
+    def test_two_firestore_contenders_commit_only_one_lease_owner(self):
+        client, runner = FirestoreClient(), AtomicRunner()
+        one = FirestoreEditionStore("project", client=client, transaction_runner=runner)
+        two = FirestoreEditionStore("project", client=client, transaction_runner=runner)
+        self.assertEqual("one", one.acquire(DAY, "one", NOW).lease_owner)
+        with self.assertRaises(StateConflict):
+            two.acquire(DAY, "two", NOW)
+        persisted = client.documents[("news_digest_editions", DAY.isoformat())].value
+        self.assertEqual("one", persisted["lease_owner"])
+        self.assertEqual(2, runner.calls)
+
+    def test_stale_firestore_transaction_is_rejected_before_set(self):
+        client = FirestoreClient()
+        base_runner = AtomicRunner()
+        first = FirestoreEditionStore("project", client=client, transaction_runner=base_runner)
+        first.acquire(DAY, "one", NOW)
+        document = client.documents[("news_digest_editions", DAY.isoformat())]
+
+        def stale_runner(doc, run_date, mutation, adapter):
+            observed = doc.generation
+            local = __import__("news_digest.state", fromlist=["InMemoryEditionStore"]).InMemoryEditionStore()
+            local._editions[run_date] = edition_from_dict(doc.get().to_dict())
+            result = mutation(local)
+            # A concurrent transaction commits after this transaction's read.
+            concurrent = dict(doc.value)
+            concurrent["lease_expires_at"] = (NOW + timedelta(minutes=10)).isoformat()
+            doc.set(concurrent)
+            if doc.generation != observed:
+                raise StateConflict("stale transaction rejected")
+            doc.set(edition_to_dict(local._editions[run_date]))
+            return result
+
+        stale = FirestoreEditionStore("project", client=client, transaction_runner=stale_runner)
+        with self.assertRaisesRegex(StateConflict, "stale transaction"):
+            stale.heartbeat(DAY, "one", NOW)
+        self.assertEqual((NOW + timedelta(minutes=10)).isoformat(),
+                         document.value["lease_expires_at"])
+
+    def test_secret_alias_stale_generation_is_rejected_and_prior_is_preserved(self):
+        old = OAuthToken("a1", "r1", NOW)
+        client = SecretClient(old)
+        state = {"active": "1", "generation": 1}
+
+        def alias_cas(expected, new):
+            if state["active"] != expected:
+                return False
+            state["active"] = new
+            state["generation"] += 1
+            return True
+
+        first = SecretManagerTokenStore("project", "token", client=client,
+                                        alias_cas=alias_cas)
+        second = SecretManagerTokenStore("project", "token", client=client,
+                                         alias_cas=alias_cas)
+        candidate_one = first.create(OAuthToken("a2", "r2", NOW))
+        candidate_two = second.create(OAuthToken("a3", "r3", NOW))
+        self.assertTrue(first.compare_and_set_active("1", candidate_one))
+        self.assertFalse(second.compare_and_set_active("1", candidate_two))
+        self.assertEqual(candidate_one, state["active"])
+        self.assertIn("1", client.versions)
+        self.assertNotIn("1", client.disabled)
+
+    def test_google_secret_alias_update_requires_and_carries_etag_precondition(self):
+        class GoogleSecretClient(SecretClient):
+            __module__ = "google.cloud.secretmanager"
+
+            def __init__(self, token, etag):
+                super().__init__(token)
+                self.etag = etag
+                self.updated_etag = None
+
+            def get_secret(self, request):
+                return SimpleNamespace(version_aliases=dict(self.aliases), etag=self.etag)
+
+            def update_secret(self, request):
+                self.updated_etag = request["secret"].etag
+                super().update_secret(request)
+
+        old = OAuthToken("a1", "r1", NOW)
+        missing = SecretManagerTokenStore("project", "token",
+                                          client=GoogleSecretClient(old, ""))
+        with self.assertRaisesRegex(RuntimeError, "etag"):
+            missing.compare_and_set_active("1", "2")
+        guarded_client = GoogleSecretClient(old, "generation-7")
+        guarded = SecretManagerTokenStore("project", "token", client=guarded_client)
+        self.assertTrue(guarded.compare_and_set_active("1", "2"))
+        self.assertEqual("generation-7", guarded_client.updated_etag)
 
 
 class CloudCliTests(unittest.TestCase):
