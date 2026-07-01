@@ -113,11 +113,11 @@ class BudgetedModelSummarizer:
             raise ModelBudgetExceeded("estimated model request exceeds configured ceiling")
         if sum(estimates, Decimal("0")) > self.max_run_usd:
             raise ModelBudgetExceeded("estimated model run exceeds $%.2f ceiling" % self.max_run_usd)
-        results = []
+        results: list[DigestItem] = []
         for cluster, request in zip(clusters, requests):
             try:
                 results.append(parse_synthesis(cluster, self.client.complete_json(request)))
-            except Exception:
+            except (OSError, ValueError, TypeError, KeyError):
                 # Availability or malformed output must not weaken evidence validation.
                 results.append(deterministic_fallback(cluster))
         return results

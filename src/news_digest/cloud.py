@@ -6,7 +6,7 @@ not require Google packages or application-default credentials.
 
 import json
 from datetime import date, datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from .auth import OAuthToken
 from .state import DeliveryRecord, DeliveryStatus, Edition, InMemoryEditionStore

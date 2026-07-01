@@ -60,9 +60,6 @@ class OAuthBootstrapTests(unittest.TestCase):
     def test_code_exchange_posts_grant_and_builds_expiring_token(self):
         payload = json.dumps({"access_token": "access-secret", "refresh_token": "refresh-secret",
                               "expires_in": 3600, "refresh_token_expires_in": 86400}).encode()
-        response = io.BytesIO(payload)
-        response.__enter__ = lambda value: value  # type: ignore[attr-defined]
-        response.__exit__ = lambda *args: None  # type: ignore[attr-defined]
         requests = []
 
         class Response:
@@ -224,6 +221,18 @@ class ModelGuardTests(unittest.TestCase):
         self.assertEqual([candidate.primary.title for candidate in clusters],
                          [item.headline for item in results])
         self.assertTrue(all(item.clauses[0].evidence_ids == ("E1",) for item in results))
+
+    def test_unexpected_model_programming_error_is_not_masked(self):
+        class BrokenClient(RecordingModelClient):
+            def complete_json(self, request):
+                raise RuntimeError("client programming defect")
+
+        summarizer = BudgetedModelSummarizer(
+            BrokenClient(), self.prices, "nano", "mini",
+            max_run_usd=Decimal("1"), max_request_usd=Decimal("1"),
+        )
+        with self.assertRaisesRegex(RuntimeError, "programming defect"):
+            summarizer.summarize_all([cluster()])
 
 
 class BudgetArtifactTests(unittest.TestCase):

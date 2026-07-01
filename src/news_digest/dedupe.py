@@ -47,7 +47,8 @@ def _to_cluster(articles: List[ArticleCandidate]) -> EventCluster:
     seen_urls = set()
     for article in articles:
         if article.url not in seen_urls:
-            unique.append(article); seen_urls.add(article.url)
+            unique.append(article)
+            seen_urls.add(article.url)
     lineage = defaultdict(list)
     for article in unique:
         lineage[article.metadata.get("syndication_id", "")].append(article.publisher)

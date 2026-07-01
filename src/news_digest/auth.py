@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Optional, Protocol
+from typing import Optional, Protocol
 
 
 class AuthenticationError(RuntimeError):

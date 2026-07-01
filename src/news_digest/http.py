@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Mapping
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 

@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Dict, FrozenSet, Iterable, Mapping, Optional
+from typing import Dict, FrozenSet, Iterable, Mapping
 
 from .models import SourceMechanism
 
@@ -101,4 +101,3 @@ def _parse_policy(raw: object) -> SourcePolicy:
         terms_url=_required_text(raw, "terms_url"), reviewed_on=_parse_date(raw, "reviewed_on"),
         expires_on=_parse_date(raw, "expires_on"),
     )
-

@@ -3,7 +3,7 @@
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 from enum import Enum
 from threading import RLock
 from typing import Dict, Optional, Sequence
