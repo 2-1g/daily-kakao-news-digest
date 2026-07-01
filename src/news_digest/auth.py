@@ -126,3 +126,13 @@ class InMemoryTokenStore:
             raise AuthenticationError("cannot retire active token version")
         self.retired.add(version)
 
+
+def kakao_authorization_url(client_id: str, redirect_uri: str,
+                            state: str, scope: str = "talk_message") -> str:
+    """Build an attended Kakao consent URL without exposing any secret."""
+    from urllib.parse import urlencode
+    if not client_id or not redirect_uri or not state:
+        raise ValueError("client_id, redirect_uri, and state are required")
+    query = urlencode({"client_id": client_id, "redirect_uri": redirect_uri,
+                       "response_type": "code", "scope": scope, "state": state})
+    return "https://kauth.kakao.com/oauth/authorize?" + query

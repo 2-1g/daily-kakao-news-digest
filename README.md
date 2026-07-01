@@ -7,10 +7,9 @@ editorial composition, conservative delivery state, and Google Cloud adapters.
 ## Current readiness
 
 Local payload validation and the automated tests are ready. **Unattended live
-operation is not ready out of the box:** the sample source policies are
-unapproved, OAuth bootstrap/reconciliation are adapter operations rather than
-operator CLI commands, cloud billing alerts are not provisioned by this repo,
-and no authorized live Kakao smoke test has been run. Never enable live sending
+operation is not ready out of the box:** sample source policies are unapproved,
+operator CLIs still require reviewed IAM/credentials, the budget artifact has
+not been applied, and no authorized live Kakao smoke test has run. Never enable live sending
 until the checklist in [`docs/runbooks/deployment.md`](docs/runbooks/deployment.md)
 is complete.
 
@@ -70,6 +69,15 @@ Operational procedures:
 - [manual `unknown` reconciliation](docs/runbooks/manual-reconciliation.md)
 - [budget alerts and suspension](docs/runbooks/budget-suspension.md)
 
+Attended operations:
+
+```bash
+news-digest oauth-url --redirect-uri "$KAKAO_REDIRECT_URI"
+news-digest oauth-exchange --redirect-uri "$KAKAO_REDIRECT_URI" # hidden code prompt
+news-digest reconcile --edition-id YYYY-MM-DD --message-index N \
+  --reason "observed evidence" --operator "$USER"
+```
+
 ## Test
 
 ```bash
@@ -80,8 +88,8 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 Python standard library. Its sample entries are intentionally unapproved until
 an operator verifies current terms and fills every required compliance field.
 
-The implementation currently uses deterministic extractive summaries; it does
-not call an LLM. The planned `$0.10` per-run model guard must be implemented and
-tested before adding model calls. The `$5/month` budget is an asynchronous
-Google Cloud Billing alert policy plus a manual suspension procedure, not a
-synchronous spending cap.
+The default uses deterministic extractive summaries. Model synthesis requires
+an explicit opt-in, nano/mini names, API key, and reviewed price JSON. Evidence
+IDs remain schema-validated and failures fall back deterministically. The local
+estimator rejects a run above `$0.10` before any model request. The `$5/month`
+budget remains an asynchronous alert plus manual suspension, not a hard cap.

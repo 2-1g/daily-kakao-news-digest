@@ -3,13 +3,18 @@
 This is an attended operator procedure. It must never run in the scheduled
 runtime identity.
 
-> **Implementation status:** this repository does not currently provide an
-> OAuth bootstrap CLI or authorization-code exchange command. Do not interpret
-> the steps below as runnable commands. Obtain the initial token with a separate,
-> reviewed operator-only tool (or add and test such a command) before deployment;
-> then store its JSON in Secret Manager using the schema accepted by
-> `token_to_json()` in `src/news_digest/cloud.py`. Never place token JSON in a
-> repository file or shell history.
+The repository provides an attended operator CLI. It stores the exchanged token
+directly in Secret Manager and prints metadata only. Never pass `--code` in a
+shared shell; omitting it uses a hidden prompt.
+
+```bash
+news-digest oauth-url --redirect-uri "$KAKAO_REDIRECT_URI"
+news-digest oauth-exchange --redirect-uri "$KAKAO_REDIRECT_URI"
+```
+
+For intentional reauthorization, add `--replace-active`. The candidate is
+verified before the `active` alias changes. This belongs to the bootstrap
+identity, never the scheduled runtime identity.
 
 1. Enable the bootstrap identity and confirm it can access only the Kakao OAuth
    client secret and candidate token secret.

@@ -73,3 +73,35 @@ class KakaoOAuthHttpRefresher:
                                 if refresh_expiry is not None else None),
         )
 
+
+class KakaoOAuthCodeExchanger:
+    """Attended authorization-code exchange; token values are never logged."""
+
+    endpoint = "https://kauth.kakao.com/oauth/token"
+
+    def __init__(self, client_id: str, redirect_uri: str, client_secret: str = "") -> None:
+        self.client_id = client_id
+        self.redirect_uri = redirect_uri
+        self.client_secret = client_secret
+
+    def exchange(self, code: str) -> OAuthToken:
+        if not code.strip():
+            raise ValueError("authorization code is required")
+        fields = {"grant_type": "authorization_code", "client_id": self.client_id,
+                  "redirect_uri": self.redirect_uri, "code": code.strip()}
+        if self.client_secret:
+            fields["client_secret"] = self.client_secret
+        request = Request(self.endpoint, data=urlencode(fields).encode(), method="POST",
+                          headers={"Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            with urlopen(request, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            raise ReauthorizationRequired("Kakao authorization-code grant rejected") from exc
+        now = datetime.now(timezone.utc)
+        refresh_expiry = payload.get("refresh_token_expires_in")
+        return OAuthToken(
+            str(payload["access_token"]), str(payload["refresh_token"]),
+            now + timedelta(seconds=int(payload["expires_in"])),
+            now + timedelta(seconds=int(refresh_expiry)) if refresh_expiry is not None else None,
+        )

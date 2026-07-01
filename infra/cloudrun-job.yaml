@@ -26,12 +26,17 @@ spec:
                   value: kakao-token-active
                 - name: EDITION_TIMEZONE
                   value: Asia/Seoul
-                # No model is called by the current implementation. Add model
-                # credentials only after the tested $0.10/run guard exists.
+                # Model synthesis remains disabled. If enabled later, inject
+                # API credentials from Secret Manager and explicit reviewed
+                # model pricing; the local $0.10/run estimator fails closed.
                 # Delivery remains a safe dry run until the operator explicitly
                 # changes this after the authorized Kakao smoke test.
                 - name: NEWS_DIGEST_LIVE_SEND
                   value: "false"
+                - name: MODEL_SUMMARIZER_ENABLED
+                  value: "false"
+                - name: MODEL_MAX_RUN_USD
+                  value: "0.10"
               resources:
                 limits:
                   cpu: "1"

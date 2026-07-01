@@ -22,9 +22,8 @@ and apply the least-privilege contract in [`../../infra/iam.md`](../../infra/iam
 The runtime needs Firestore access only to edition documents and Secret Manager
 access only to the named active Kakao token. Do not grant Owner or Editor.
 
-Complete the attended [OAuth bootstrap](oauth-bootstrap.md). The current repo
-does not implement that bootstrap CLI, so this is a deployment blocker until a
-reviewed operator tool supplies a token secret with an `active` version alias.
+Complete the attended [OAuth bootstrap](oauth-bootstrap.md) using the operator
+CLI and verify that the token secret has an `active` version alias.
 Do not put `KAKAO_CLIENT_SECRET`, access tokens, or refresh tokens in image
 layers or manifests.
 
@@ -37,9 +36,9 @@ reviewed deployment; never add literal values to `infra/cloudrun-job.yaml`.
 
 Complete [source approval](source-approval.md). Configure a USD $5/month Cloud
 Billing Budget with asynchronous 50/80/100% alerts and validate the recipient.
-Follow [budget suspension](budget-suspension.md) at 100%. The current pipeline
-does not call an LLM; do not add one until a tested $0.10/run synchronous model
-estimate guard exists.
+Follow [budget suspension](budget-suspension.md) at 100%. Model synthesis is
+opt-in and requires a reviewed explicit price table; keep it disabled for the
+first cloud dry run.
 
 ## 4. Deploy safely
 
@@ -65,6 +64,5 @@ authorized self-message smoke test. Verify order, links, limits, acknowledgement
 and acknowledged rerun no-op. Restore `false` if any observation is ambiguous.
 
 An injected timeout/real ambiguous send must become `unknown`; never retry it.
-Follow [manual reconciliation](manual-reconciliation.md). Because the current
-repo has no reconciliation CLI and this work has not performed a live smoke
-test, unattended live enablement remains explicitly unverified.
+Follow [manual reconciliation](manual-reconciliation.md). This work has not
+performed a live smoke test, so unattended live enablement remains unverified.

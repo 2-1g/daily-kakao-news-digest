@@ -1,12 +1,18 @@
 # Budget alert and suspension
 
-The approved design requires a local model guard to reject a request whose
-estimate would exceed $0.10 per run. **No model call or model-cost guard is
-currently implemented**, so adding a model is forbidden until that guard and
-its tests exist. The $5 monthly cloud/model budget is asynchronous and cannot
-be enforced as a synchronous billing cutoff. The repository also does not
-provision a Billing Budget resource; an operator must configure and verify it
-in the target billing account.
+The opt-in model path estimates all requests locally and rejects the entire run
+before network I/O if an explicit price table would exceed $0.10. It also
+enforces a per-request ceiling. Prices must be reviewed when models or rates
+change.
+
+The $5 monthly budget remains asynchronous and cannot enforce a synchronous
+cutoff. Create its notification thresholds with:
+
+```bash
+GOOGLE_CLOUD_BILLING_ACCOUNT=... GOOGLE_CLOUD_PROJECT=... infra/setup-budget.sh
+```
+
+The script does **not** suspend services. Verify the notification recipient.
 
 - **50%:** inspect source/model request counts and forecast month-end spend.
 - **80%:** reduce optional model work and prepare to suspend.

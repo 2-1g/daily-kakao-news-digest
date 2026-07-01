@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import socket
+from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -19,6 +20,8 @@ from .pipeline import DigestPipeline
 from .rank import rank_clusters
 from .sources import GdeltAdapter, NaverAdapter
 from .summarize import summarize
+from .model_summarizer import BudgetedModelSummarizer, OpenAIResponsesClient, prices_from_json
+from .operator import authorization_url, bootstrap_token, reconcile_delivery
 
 
 def _env(name: str, required: bool = True) -> str:
@@ -45,7 +48,18 @@ def collect_and_compose() -> List[str]:
         raise RuntimeError("no compliant source adapter configured")
     today = datetime.now(timezone.utc).date()
     articles = [article for adapter in adapters for article in adapter.collect(today)]
-    items = [summarize(cluster) for cluster in rank_clusters(cluster_articles(articles))]
+    clusters = rank_clusters(cluster_articles(articles))
+    if os.environ.get("MODEL_SUMMARIZER_ENABLED", "false").lower() == "true":
+        summarizer = BudgetedModelSummarizer(
+            OpenAIResponsesClient(_env("MODEL_API_KEY")),
+            prices_from_json(_env("MODEL_PRICING_JSON")),
+            _env("MODEL_NANO_NAME"), _env("MODEL_MINI_NAME"),
+            Decimal(os.environ.get("MODEL_MAX_RUN_USD", "0.10")),
+            Decimal(os.environ.get("MODEL_MAX_REQUEST_USD", "0.03")),
+            int(os.environ.get("MODEL_MAX_OUTPUT_TOKENS", "500")))
+        items = summarizer.summarize_all(clusters)
+    else:
+        items = [summarize(cluster) for cluster in clusters]
     return list(DigestComposer().compose(items, today.isoformat()).messages)
 
 
@@ -74,11 +88,20 @@ def _read_messages(path: Path) -> List[str]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate a Kakao digest without network I/O")
-    parser.add_argument("command", nargs="?", choices=("run",))
+    parser = argparse.ArgumentParser(description="Kakao digest runtime and attended operator tools")
+    parser.add_argument("command", nargs="?", choices=("run", "oauth-url", "oauth-exchange",
+                                                         "reconcile"))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--messages", type=Path,
                         help="JSON file containing a list of final Kakao message strings")
+    parser.add_argument("--redirect-uri")
+    parser.add_argument("--state")
+    parser.add_argument("--code", help="unsafe in shell history; omit to use a hidden prompt")
+    parser.add_argument("--replace-active", action="store_true")
+    parser.add_argument("--edition-id")
+    parser.add_argument("--message-index", type=int)
+    parser.add_argument("--reason")
+    parser.add_argument("--operator", default=os.environ.get("NEWS_DIGEST_OPERATOR", ""))
     args = parser.parse_args(argv)
     if args.command == "run":
         if args.messages:
@@ -86,6 +109,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.dry_run:
             os.environ["NEWS_DIGEST_LIVE_SEND"] = "false"
         return run_cloud()
+    if args.command == "oauth-url":
+        if not args.redirect_uri:
+            parser.error("oauth-url requires --redirect-uri")
+        print(authorization_url(_env("KAKAO_CLIENT_ID"), args.redirect_uri, args.state))
+        return 0
+    if args.command == "oauth-exchange":
+        if not args.redirect_uri:
+            parser.error("oauth-exchange requires --redirect-uri")
+        print(bootstrap_token(_env("GOOGLE_CLOUD_PROJECT"), _env("KAKAO_TOKEN_SECRET"),
+                              _env("KAKAO_CLIENT_ID"), args.redirect_uri,
+                              _env("KAKAO_CLIENT_SECRET", False), args.code,
+                              args.replace_active))
+        return 0
+    if args.command == "reconcile":
+        if not args.edition_id or args.message_index is None or not args.reason or not args.operator:
+            parser.error("reconcile requires --edition-id, --message-index, --reason, and --operator")
+        print(reconcile_delivery(_env("GOOGLE_CLOUD_PROJECT"), args.edition_id,
+                                 args.message_index, args.reason, args.operator))
+        return 0
     if not args.dry_run or args.messages is None:
         parser.error("local validation requires --dry-run --messages")
     try:

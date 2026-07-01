@@ -34,6 +34,7 @@ class DeliveryRecord:
     status: DeliveryStatus
     updated_at: datetime
     reconciliation_reason: Optional[str] = None
+    reconciliation_operator: Optional[str] = None
 
 
 @dataclass
@@ -140,7 +141,8 @@ class InMemoryEditionStore:
             return changed
 
     def reconcile_unknown_as_acknowledged(self, run_date: date, position: int,
-                                          now: datetime, reason: str) -> None:
+                                          now: datetime, reason: str,
+                                          operator: str = "operator") -> None:
         """Operator-only reconciliation after inspecting Kakao self-chat.
 
         Persistent adapters should bind this operation to operator IAM and retain
@@ -148,6 +150,8 @@ class InMemoryEditionStore:
         """
         if not reason.strip():
             raise ValueError("an operator audit reason is required")
+        if not operator.strip():
+            raise ValueError("an operator identity is required")
         with self._lock:
             edition = self._editions[run_date]
             record = edition.deliveries[position]
@@ -156,6 +160,7 @@ class InMemoryEditionStore:
             record.status = DeliveryStatus.ACKNOWLEDGED
             record.updated_at = now
             record.reconciliation_reason = reason.strip()
+            record.reconciliation_operator = operator.strip()
 
     def get(self, run_date: date) -> Optional[Edition]:
         return self._editions.get(run_date)

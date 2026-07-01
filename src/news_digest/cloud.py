@@ -86,6 +86,22 @@ class SecretManagerTokenStore:
         self.client.disable_secret_version(
             request={"name": self.parent + "/versions/" + version})
 
+    def install_bootstrap_token(self, token: OAuthToken, replace_active: bool = False) -> str:
+        """Create, verify, then atomically point ``active`` at an attended token."""
+        candidate = self.create(token)
+        self.verify(candidate)
+        secret = self.client.get_secret(request={"name": self.parent})
+        aliases = dict(getattr(secret, "version_aliases", {}))
+        current = aliases.get(self.active_alias)
+        if current is not None and not replace_active:
+            self.retire(candidate)
+            raise RuntimeError("active token already exists; use explicit replacement")
+        aliases[self.active_alias] = int(candidate)
+        secret.version_aliases = aliases
+        self.client.update_secret(request={"secret": secret,
+                                           "update_mask": {"paths": ["version_aliases"]}})
+        return candidate
+
 
 def edition_to_dict(edition: Edition) -> Dict[str, Any]:
     return {
@@ -95,7 +111,8 @@ def edition_to_dict(edition: Edition) -> Dict[str, Any]:
         "content_hash": edition.content_hash, "messages": list(edition.messages), "missed": edition.missed,
         "deliveries": {str(k): {"position": v.position, "text": v.text, "status": v.status.value,
                                   "updated_at": v.updated_at.isoformat(),
-                                  "reconciliation_reason": v.reconciliation_reason}
+                                  "reconciliation_reason": v.reconciliation_reason,
+                                  "reconciliation_operator": v.reconciliation_operator}
                        for k, v in edition.deliveries.items()},
     }
 
@@ -103,7 +120,8 @@ def edition_to_dict(edition: Edition) -> Dict[str, Any]:
 def edition_from_dict(data: Dict[str, Any]) -> Edition:
     deliveries = {int(k): DeliveryRecord(int(v["position"]), str(v["text"]),
                   DeliveryStatus(v["status"]), datetime.fromisoformat(v["updated_at"]),
-                  v.get("reconciliation_reason")) for k, v in data.get("deliveries", {}).items()}
+                  v.get("reconciliation_reason"), v.get("reconciliation_operator"))
+                  for k, v in data.get("deliveries", {}).items()}
     return Edition(date.fromisoformat(data["run_date"]), str(data["lease_owner"]),
                    datetime.fromisoformat(data["lease_expires_at"]),
                    datetime.fromisoformat(data["delivery_started_at"])
@@ -197,6 +215,7 @@ class FirestoreEditionStore(InMemoryEditionStore):
                             if stale_after else local.recover_stale_pending(run_date, now))
 
     def reconcile_unknown_as_acknowledged(self, run_date: date, position: int,
-                                          now: datetime, reason: str) -> None:
+                                          now: datetime, reason: str,
+                                          operator: str = "operator") -> None:
         self._atomic(run_date, lambda local: local.reconcile_unknown_as_acknowledged(
-            run_date, position, now, reason))
+            run_date, position, now, reason, operator))
