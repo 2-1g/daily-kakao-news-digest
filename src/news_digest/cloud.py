@@ -33,12 +33,13 @@ class SecretManagerTokenStore:
     """Versioned token secret using Secret Manager's atomic version alias."""
 
     def __init__(self, project_id: str, secret_id: str, client: Any = None,
-                 active_alias: str = "active") -> None:
+                 active_alias: str = "active", alias_cas: Any = None) -> None:
         if client is None:
             from google.cloud import secretmanager  # type: ignore
             client = secretmanager.SecretManagerServiceClient()
         self.client, self.project_id, self.secret_id = client, project_id, secret_id
         self.active_alias = active_alias
+        self.alias_cas = alias_cas
         self.parent = "projects/%s/secrets/%s" % (project_id, secret_id)
 
     def active_version(self) -> str:
@@ -60,12 +61,19 @@ class SecretManagerTokenStore:
         self.read(version)
 
     def compare_and_set_active(self, expected: str, new: str) -> bool:
+        if self.alias_cas is not None:
+            return bool(self.alias_cas(expected, new))
         secret = self.client.get_secret(request={"name": self.parent})
         aliases = dict(getattr(secret, "version_aliases", {}))
         if str(aliases.get(self.active_alias)) != str(expected):
             return False
+        if (self.client.__class__.__module__.startswith("google.") and
+                not getattr(secret, "etag", None)):
+            raise RuntimeError("Secret Manager CAS requires a resource etag")
         aliases[self.active_alias] = int(new)
         secret.version_aliases = aliases
+        # update_secret honors the etag present on the resource and rejects a
+        # concurrent alias update rather than overwriting it.
         self.client.update_secret(request={"secret": secret,
                                            "update_mask": {"paths": ["version_aliases"]}})
         return True
@@ -113,12 +121,13 @@ class FirestoreEditionStore(InMemoryEditionStore):
     """
 
     def __init__(self, project_id: str, collection: str = "news_digest_editions",
-                 client: Any = None) -> None:
+                 client: Any = None, transaction_runner: Any = None) -> None:
         super().__init__()
         if client is None:
             from google.cloud import firestore  # type: ignore
             client = firestore.Client(project=project_id)
         self.client, self.collection = client, collection
+        self.transaction_runner = transaction_runner
 
     def _doc(self, run_date: date) -> Any:
         return self.client.collection(self.collection).document(run_date.isoformat())
@@ -131,36 +140,63 @@ class FirestoreEditionStore(InMemoryEditionStore):
     def _save(self, run_date: date) -> None:
         self._doc(run_date).set(edition_to_dict(self._editions[run_date]))
 
+    def _atomic(self, run_date: date, mutation: Any) -> Any:
+        """Apply one state-machine transition in a Firestore transaction."""
+        if self.transaction_runner is not None:
+            return self.transaction_runner(self._doc(run_date), run_date, mutation, self)
+        if not hasattr(self.client, "transaction"):
+            # Lightweight injected fakes can exercise serialization without the
+            # Google SDK. Production clients always take the transactional path.
+            self._load(run_date)
+            local = InMemoryEditionStore()
+            if run_date in self._editions:
+                local._editions[run_date] = self._editions[run_date]
+            result = mutation(local)
+            self._editions[run_date] = local._editions[run_date]
+            self._save(run_date)
+            return result
+        from google.cloud import firestore  # type: ignore
+        document = self._doc(run_date)
+        transaction = self.client.transaction()
+
+        @firestore.transactional
+        def apply(current: Any) -> Any:
+            snapshot = document.get(transaction=current)
+            local = InMemoryEditionStore()
+            if getattr(snapshot, "exists", False):
+                local._editions[run_date] = edition_from_dict(snapshot.to_dict())
+            result = mutation(local)
+            current.set(document, edition_to_dict(local._editions[run_date]))
+            self._editions[run_date] = local._editions[run_date]
+            return result
+
+        return apply(transaction)
+
     def acquire(self, run_date: date, owner: str, now: datetime, ttl: Any = None) -> Edition:
-        self._load(run_date)
-        result = super().acquire(run_date, owner, now, ttl) if ttl else super().acquire(run_date, owner, now)
-        self._save(run_date); return result
+        return self._atomic(run_date, lambda local: local.acquire(run_date, owner, now, ttl)
+                            if ttl else local.acquire(run_date, owner, now))
 
     def heartbeat(self, run_date: date, owner: str, now: datetime, ttl: Any = None) -> None:
-        self._load(run_date)
-        super().heartbeat(run_date, owner, now, ttl) if ttl else super().heartbeat(run_date, owner, now)
-        self._save(run_date)
+        self._atomic(run_date, lambda local: local.heartbeat(run_date, owner, now, ttl)
+                     if ttl else local.heartbeat(run_date, owner, now))
 
     def mark_missed(self, run_date: date, owner: str) -> None:
-        self._load(run_date); super().mark_missed(run_date, owner); self._save(run_date)
+        self._atomic(run_date, lambda local: local.mark_missed(run_date, owner))
 
     def freeze(self, run_date: date, owner: str, messages: Any) -> str:
-        self._load(run_date); result = super().freeze(run_date, owner, messages); self._save(run_date); return result
+        return self._atomic(run_date, lambda local: local.freeze(run_date, owner, messages))
 
     def begin(self, run_date: date, owner: str, position: int, now: datetime) -> None:
-        self._load(run_date); super().begin(run_date, owner, position, now); self._save(run_date)
+        self._atomic(run_date, lambda local: local.begin(run_date, owner, position, now))
 
     def resolve(self, run_date: date, owner: str, position: int, status: DeliveryStatus, now: datetime) -> None:
-        self._load(run_date); super().resolve(run_date, owner, position, status, now); self._save(run_date)
+        self._atomic(run_date, lambda local: local.resolve(run_date, owner, position, status, now))
 
     def recover_stale_pending(self, run_date: date, now: datetime, stale_after: Any = None) -> int:
-        self._load(run_date)
-        result = (super().recover_stale_pending(run_date, now, stale_after) if stale_after
-                  else super().recover_stale_pending(run_date, now))
-        self._save(run_date); return result
+        return self._atomic(run_date, lambda local: local.recover_stale_pending(run_date, now, stale_after)
+                            if stale_after else local.recover_stale_pending(run_date, now))
 
     def reconcile_unknown_as_acknowledged(self, run_date: date, position: int,
                                           now: datetime, reason: str) -> None:
-        self._load(run_date)
-        super().reconcile_unknown_as_acknowledged(run_date, position, now, reason)
-        self._save(run_date)
+        self._atomic(run_date, lambda local: local.reconcile_unknown_as_acknowledged(
+            run_date, position, now, reason))
