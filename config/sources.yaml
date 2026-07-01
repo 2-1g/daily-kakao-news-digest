@@ -1,0 +1,28 @@
+{
+  "sources": [
+    {
+      "id": "naver-news",
+      "owner": "NAVER Corp.",
+      "mechanism": "api",
+      "approved": false,
+      "permitted_fields": ["title", "originallink", "link", "description", "pubDate"],
+      "attribution_rule": "Display publisher attribution and original URL",
+      "retention_days": 0,
+      "terms_url": "https://developers.naver.com/terms/",
+      "reviewed_on": "2026-07-01",
+      "expires_on": "2026-07-01"
+    },
+    {
+      "id": "gdelt-doc",
+      "owner": "GDELT Project",
+      "mechanism": "api",
+      "approved": false,
+      "permitted_fields": ["title", "url", "domain", "seendate", "language", "sourcecountry"],
+      "attribution_rule": "Attribute the publisher URL as source of record",
+      "retention_days": 0,
+      "terms_url": "https://www.gdeltproject.org/",
+      "reviewed_on": "2026-07-01",
+      "expires_on": "2026-07-01"
+    }
+  ]
+}
