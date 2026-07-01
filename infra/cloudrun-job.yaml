@@ -30,6 +30,10 @@ spec:
                   value: Asia/Seoul
                 - name: MODEL_RUN_BUDGET_USD
                   value: "0.10"
+                # Delivery remains a safe dry run until the operator explicitly
+                # changes this after the authorized Kakao smoke test.
+                - name: NEWS_DIGEST_LIVE_SEND
+                  value: "false"
               resources:
                 limits:
                   cpu: "1"

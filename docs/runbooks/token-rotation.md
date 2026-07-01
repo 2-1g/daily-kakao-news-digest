@@ -16,3 +16,10 @@ retry the candidate and keep using prior. After pointer switch but before a
 successful-use marker, attempt the candidate and roll the pointer back if it is
 invalid. Never retire prior without both required proofs. If neither version
 works, suspend delivery and follow the reauthorization runbook.
+# Production adapter mapping
+
+`SecretManagerTokenStore` creates and verifies a new secret version, then
+switches the `active` Secret Manager version alias with the secret resource's
+etag carried through the update. Keep the previous version enabled until the
+new active version has been read and used successfully. Never disable the
+version currently referenced by `active`.

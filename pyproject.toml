@@ -8,10 +8,15 @@ version = "0.1.0"
 description = "Lawful, source-grounded inputs for a private Korean news digest"
 requires-python = ">=3.9"
 
+[project.optional-dependencies]
+cloud = ["google-cloud-firestore>=2.16,<3", "google-cloud-secret-manager>=2.20,<3"]
+
+[project.scripts]
+news-digest = "news_digest.main:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.mypy]
 python_version = "3.9"
 strict = true
-
