@@ -35,3 +35,45 @@ class CollectionBatch:
     source_id: str
     articles: Tuple[ArticleCandidate, ...]
 
+
+@dataclass(frozen=True)
+class EventCluster:
+    """Articles describing one event, with syndication lineage retained."""
+
+    event_id: str
+    articles: Tuple[ArticleCandidate, ...]
+    independent_publishers: Tuple[str, ...]
+    syndicated_publishers: Tuple[str, ...] = ()
+    category: str = "general"
+    region: str = "overseas"
+    investment_relevance: bool = False
+
+    @property
+    def primary(self) -> ArticleCandidate:
+        return self.articles[0]
+
+
+@dataclass(frozen=True)
+class Evidence:
+    evidence_id: str
+    text: str
+    publisher: str
+    url: str
+
+
+@dataclass(frozen=True)
+class GroundedClause:
+    text: str
+    evidence_ids: Tuple[str, ...]
+    analysis: bool = False
+
+
+@dataclass(frozen=True)
+class DigestItem:
+    event_id: str
+    headline: str
+    clauses: Tuple[GroundedClause, ...]
+    sources: Tuple[Evidence, ...]
+    category: str = "general"
+    region: str = "overseas"
+    investment_relevance: bool = False
