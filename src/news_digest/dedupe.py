@@ -68,7 +68,6 @@ def _to_cluster(articles: List[ArticleCandidate]) -> EventCluster:
     primary = unique[0]
     signature = "|".join(sorted(headline_tokens(primary.title)))
     event_id = hashlib.sha256(signature.encode()).hexdigest()[:16]
-    metadata = primary.metadata
     category = _classify_category(unique)
     region = _classify_region(unique)
     investment_relevance = _classify_investment(unique, category)

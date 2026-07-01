@@ -9,12 +9,19 @@ from news_digest.state import DeliveryBlocked, DeliveryStatus, InMemoryEditionSt
 NOW = datetime(2026, 7, 1, 23, 0, tzinfo=timezone.utc)
 DAY = date(2026, 7, 2)
 
+
 class Clock:
-    def __init__(self): self.now = NOW
-    def __call__(self): return self.now
+    def __init__(self):
+        self.now = NOW
+
+    def __call__(self):
+        return self.now
+
 
 class Refresher:
-    def refresh(self, value): raise AssertionError("unexpected refresh")
+    def refresh(self, value):
+        raise AssertionError("unexpected refresh")
+
 
 class RuntimeHardeningTests(unittest.TestCase):
     def token_store(self):
@@ -23,20 +30,24 @@ class RuntimeHardeningTests(unittest.TestCase):
 
     def test_stage_heartbeat_prevents_second_worker_during_fifteen_minute_send(self):
         store, clock, tokens = InMemoryEditionStore(), Clock(), self.token_store()
+
         class Transport:
             def send_self_message(inner, access_token, text):
                 clock.now += timedelta(minutes=15)
                 with self.assertRaises(StateConflict):
                     store.acquire(DAY, "worker-2", clock.now)
+
         app = DigestPipeline(store, OAuthManager(tokens, Refresher()),
                              KakaoClient(Transport()), clock)
         self.assertEqual("acknowledged", app.run("worker-1", ["one"]).status)
 
     def test_definite_rejection_is_durable_failed_not_unknown(self):
         store, tokens = InMemoryEditionStore(), self.token_store()
+
         class Transport:
             def send_self_message(self, access_token, text):
                 raise DefiniteDeliveryError("rejected")
+
         app = DigestPipeline(store, OAuthManager(tokens, Refresher()),
                              KakaoClient(Transport()), lambda: NOW)
         self.assertEqual("terminal_delivery_failure", app.run("one", ["one"]).status)
@@ -51,8 +62,11 @@ class RuntimeHardeningTests(unittest.TestCase):
         manager = OAuthManager(tokens, Refresher())
         manager.valid_access_token(NOW)
         self.assertEqual(set(), tokens.successful)
+
         class Transport:
-            def send_self_message(self, access_token, text): return None
+            def send_self_message(self, access_token, text):
+                return None
+
         DigestPipeline(InMemoryEditionStore(), manager, KakaoClient(Transport()),
                        lambda: NOW).run("one", ["one"])
         self.assertEqual({"1"}, tokens.successful)
@@ -65,4 +79,5 @@ class RuntimeHardeningTests(unittest.TestCase):
         self.assertEqual("oauth_refresh_expiry_warning", events[0][0])
         self.assertNotIn("access_token", events[0][1])
 
-if __name__ == "__main__": unittest.main()
+if __name__ == "__main__":
+    unittest.main()

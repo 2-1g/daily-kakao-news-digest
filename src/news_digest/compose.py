@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Sequence
 
-from .models import DigestItem
+from .models import DigestItem, Evidence
 
 
 DISCLAIMER = "※ 정보 제공용이며 투자 권유가 아닙니다."
@@ -53,17 +53,18 @@ class DigestComposer:
             numbered = self._number(bodies)
         return ComposedDigest(tuple(numbered), insufficient)
 
-    def _fit_item(self, headline: str, facts: str, sources) -> str | None:
+    def _fit_item(self, headline: str, facts: str,
+                  sources: Sequence[Evidence]) -> str | None:
         """Compress prose, never a URL, so displayed links remain usable."""
         payload_limit = self.max_chars - 8  # reserve stable room for "[18/18] "
-        suffixes = ["\n%s · %s" % (source.publisher, source.url) for source in sources]
         # Keep at least two independent corroborating citations when they fit;
         # discard only citations whose URL itself makes a Kakao-safe item impossible.
         suffix = ""
         seen_publishers = set()
-        for source, candidate in zip(sources, suffixes):
+        for source in sources:
             if source.publisher in seen_publishers:
                 continue
+            candidate = "\n%s · %s" % (source.publisher, source.url)
             if len(suffix + candidate) + 12 <= payload_limit:
                 suffix += candidate
                 seen_publishers.add(source.publisher)

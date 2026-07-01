@@ -2,9 +2,9 @@
 
 import argparse
 import json
+import logging
 import os
 import socket
-import logging
 import time
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
@@ -19,8 +19,7 @@ from .dedupe import cluster_articles
 from .http import KakaoHttpTransport, KakaoOAuthHttpRefresher, UrllibHttpClient
 from .kakao import KakaoClient, validate_messages
 from .pipeline import DigestPipeline
-from .rank import rank_clusters
-from .rank import editorial_metrics as rank_editorial_metrics
+from .rank import editorial_metrics as rank_editorial_metrics, rank_clusters
 from .sources import GdeltAdapter, NaverAdapter
 from .summarize import summarize
 from .model_summarizer import BudgetedModelSummarizer, OpenAIResponsesClient, prices_from_json
@@ -81,7 +80,10 @@ def collect_and_compose(emit=None) -> List[str]:
 def run_cloud() -> int:
     started = time.monotonic()
     logger = logging.getLogger("news_digest")
-    emit = lambda event, **fields: log_event(logger, event, **fields)
+
+    def emit(event, **fields):
+        log_event(logger, event, **fields)
+
     project = _env("GOOGLE_CLOUD_PROJECT")
     messages_file = os.environ.get("NEWS_DIGEST_MESSAGES_FILE")
     live = os.environ.get("NEWS_DIGEST_LIVE_SEND", "false").lower() == "true"
