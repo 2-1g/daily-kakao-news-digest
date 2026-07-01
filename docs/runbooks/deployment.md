@@ -66,3 +66,16 @@ and acknowledged rerun no-op. Restore `false` if any observation is ambiguous.
 An injected timeout/real ambiguous send must become `unknown`; never retry it.
 Follow [manual reconciliation](manual-reconciliation.md). This work has not
 performed a live smoke test, so unattended live enablement remains unverified.
+
+## Runtime invariants and observability
+
+Each daily run has a durable `edition_id` (`digest-YYYY-MM-DD-0800-kst`) distinct from
+the KST date field. The worker extends its lease to cover each potentially long stage;
+a 15-minute Kakao operation remains protected despite the base five-minute acquisition
+lease. Ambiguous transport outcomes become `unknown` and require reconciliation.
+Definite Kakao rejection becomes durable delivery `rejected` plus edition `failed` and
+must not be reconciled as though delivery might have succeeded.
+
+Cloud Logging events expose status, duration, message/character totals and configured
+cost, with helpers for source concentration, evidence coverage, domestic and investment
+ratios. Token-, secret-, authorization-, and credential-shaped fields are redacted.

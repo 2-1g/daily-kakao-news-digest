@@ -4,6 +4,8 @@ import argparse
 import json
 import os
 import socket
+import logging
+import time
 from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +24,7 @@ from .sources import GdeltAdapter, NaverAdapter
 from .summarize import summarize
 from .model_summarizer import BudgetedModelSummarizer, OpenAIResponsesClient, prices_from_json
 from .operator import authorization_url, bootstrap_token, reconcile_delivery
+from .logging import log_event
 
 
 def _env(name: str, required: bool = True) -> str:
@@ -64,6 +67,9 @@ def collect_and_compose() -> List[str]:
 
 
 def run_cloud() -> int:
+    started = time.monotonic()
+    logger = logging.getLogger("news_digest")
+    emit = lambda event, **fields: log_event(logger, event, **fields)
     project = _env("GOOGLE_CLOUD_PROJECT")
     messages_file = os.environ.get("NEWS_DIGEST_MESSAGES_FILE")
     messages = _read_messages(Path(messages_file)) if messages_file else collect_and_compose()
@@ -71,11 +77,19 @@ def run_cloud() -> int:
     store = FirestoreEditionStore(project)
     token_store = SecretManagerTokenStore(project, _env("KAKAO_TOKEN_SECRET"))
     oauth = OAuthManager(token_store, KakaoOAuthHttpRefresher(
-        _env("KAKAO_CLIENT_ID"), _env("KAKAO_CLIENT_SECRET", False)))
+        _env("KAKAO_CLIENT_ID"), _env("KAKAO_CLIENT_SECRET", False)), emit)
     pipeline = DigestPipeline(store, oauth, KakaoClient(KakaoHttpTransport()),
                               lambda: datetime.now(timezone.utc))
+    # Preserve compatibility with dependency-injected pipeline fakes while
+    # enabling structured production events on the concrete implementation.
+    if hasattr(pipeline, "event_sink"):
+        pipeline.event_sink = emit
     result = pipeline.run(os.environ.get("CLOUD_RUN_EXECUTION", socket.gethostname()),
                           messages, dry_run=not live)
+    emit("digest_runtime_metrics", status=result.status,
+         duration_seconds=round(time.monotonic() - started, 3),
+         message_count=len(messages), character_count=sum(map(len, messages)),
+         estimated_cost_usd=os.environ.get("NEWS_DIGEST_ESTIMATED_COST_USD", "unknown"))
     print(json.dumps(result.__dict__, ensure_ascii=False, sort_keys=True))
     return 0 if result.status in ("dry_run", "acknowledged", "missed") else 2
 

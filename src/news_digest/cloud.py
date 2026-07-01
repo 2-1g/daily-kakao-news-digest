@@ -74,9 +74,22 @@ class SecretManagerTokenStore:
         secret.version_aliases = aliases
         # update_secret honors the etag present on the resource and rejects a
         # concurrent alias update rather than overwriting it.
-        self.client.update_secret(request={"secret": secret,
-                                           "update_mask": {"paths": ["version_aliases"]}})
+        try:
+            self.client.update_secret(request={"secret": secret,
+                                               "update_mask": {"paths": ["version_aliases"]}})
+        except Exception as exc:
+            # Secret Manager exposes optimistic-lock failures as Aborted or
+            # FailedPrecondition. Normalize those races to a recoverable CAS miss.
+            if exc.__class__.__name__ in ("Aborted", "FailedPrecondition", "Conflict"):
+                return False
+            raise
         return True
+
+    def record_rotation_phase(self, version: str, phase: str,
+                              details: Dict[str, str]) -> None:
+        # The active alias is the durable phase boundary. Phase events belong in
+        # Cloud Logging rather than secret payload metadata.
+        return None
 
     def mark_successful_use(self, version: str) -> None:
         # Successful use is operational evidence; Cloud Logging records it. No secret mutation.
@@ -114,6 +127,8 @@ def edition_to_dict(edition: Edition) -> Dict[str, Any]:
                                   "reconciliation_reason": v.reconciliation_reason,
                                   "reconciliation_operator": v.reconciliation_operator}
                        for k, v in edition.deliveries.items()},
+        "edition_id": edition.edition_id,
+        "terminal_status": edition.terminal_status,
     }
 
 
@@ -127,7 +142,8 @@ def edition_from_dict(data: Dict[str, Any]) -> Edition:
                    datetime.fromisoformat(data["delivery_started_at"])
                    if data.get("delivery_started_at") else None,
                    data.get("content_hash"), tuple(data.get("messages", ())), deliveries,
-                   bool(data.get("missed", False)))
+                   bool(data.get("missed", False)), data.get("edition_id", ""),
+                   data.get("terminal_status"))
 
 
 class FirestoreEditionStore(InMemoryEditionStore):

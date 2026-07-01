@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Protocol
+from typing import Callable, Optional, Protocol
 
 
 class AuthenticationError(RuntimeError):
@@ -51,9 +51,20 @@ class RotationResult:
 
 
 class OAuthManager:
-    def __init__(self, store: VersionedTokenStore, refresher: TokenRefresher) -> None:
+    def __init__(self, store: VersionedTokenStore, refresher: TokenRefresher,
+                 event_sink: Optional[Callable[..., None]] = None) -> None:
         self._store = store
         self._refresher = refresher
+        self._event_sink = event_sink or (lambda *args, **kwargs: None)
+
+    def _phase(self, version: str, phase: str, **details: str) -> None:
+        recorder = getattr(self._store, "record_rotation_phase", None)
+        if recorder:
+            recorder(version, phase, details)
+
+    def mark_successful_use(self, version: str) -> None:
+        """Mark only after Kakao has accepted an authenticated request."""
+        self._store.mark_successful_use(version)
 
     def valid_access_token(self, now: Optional[datetime] = None) -> RotationResult:
         now = now or datetime.now(timezone.utc)
@@ -61,8 +72,11 @@ class OAuthManager:
         token = self._store.read(active)
         if token.refresh_expires_at is not None and token.refresh_expires_at <= now:
             raise ReauthorizationRequired("refresh token expired; operator reauthorization required")
+        if token.refresh_expiring(now):
+            self._event_sink("oauth_refresh_expiry_warning", version=active,
+                             expires_at=token.refresh_expires_at,
+                             days_remaining=max(0, (token.refresh_expires_at - now).days))
         if not token.access_expiring(now):
-            self._store.mark_successful_use(active)
             return RotationResult(token, active)
         try:
             refreshed = self._refresher.refresh(token.refresh_token)
@@ -76,13 +90,16 @@ class OAuthManager:
             refreshed = replace(refreshed, refresh_token=token.refresh_token,
                                 refresh_expires_at=token.refresh_expires_at)
         new_version = self._store.create(refreshed)
+        self._phase(new_version, "candidate_created", previous=active)
         self._store.verify(new_version)
+        self._phase(new_version, "candidate_verified", previous=active)
         if not self._store.compare_and_set_active(active, new_version):
             # A concurrent rotation won. The new version is unreferenced and safe to retire.
             self._store.retire(new_version)
+            self._phase(new_version, "cas_lost_retired", previous=active)
             winner = self._store.active_version()
             return RotationResult(self._store.read(winner), winner)
-        self._store.mark_successful_use(new_version)
+        self._phase(new_version, "active_pending_validation", previous=active)
         # Prior version is intentionally retained; an operator/grace-period task retires it.
         return RotationResult(refreshed, new_version, active)
 
@@ -95,6 +112,7 @@ class InMemoryTokenStore:
         self.active = "1"
         self.successful = set()  # type: set[str]
         self.retired = set()  # type: set[str]
+        self.rotation_phases = {}  # type: dict[str, tuple[str, dict[str, str]]]
 
     def active_version(self) -> str:
         return self.active
@@ -125,6 +143,10 @@ class InMemoryTokenStore:
         if version == self.active:
             raise AuthenticationError("cannot retire active token version")
         self.retired.add(version)
+
+    def record_rotation_phase(self, version: str, phase: str,
+                              details: dict[str, str]) -> None:
+        self.rotation_phases[version] = (phase, details)
 
 
 def kakao_authorization_url(client_id: str, redirect_uri: str,

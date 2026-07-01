@@ -23,3 +23,16 @@ switches the `active` Secret Manager version alias with the secret resource's
 etag carried through the update. Keep the previous version enabled until the
 new active version has been read and used successfully. Never disable the
 version currently referenced by `active`.
+
+## Rotation state and validation
+
+A newly refreshed secret moves through `candidate_created`, `candidate_verified`, and
+`active_pending_validation`. Alias CAS races are recoverable: the losing candidate is
+disabled and the winner is re-read. An `Aborted`/`FailedPrecondition` etag conflict is
+treated as a CAS miss, never as permission to overwrite the winner. The new version is
+marked successfully used only after Kakao accepts an authenticated send; creating,
+verifying, or activating a version alone is not proof of usability. Keep the previous
+version enabled until this validation is visible, so an operator can roll the alias back.
+
+The `oauth_refresh_expiry_warning` structured event is emitted within seven days of
+refresh-token expiry. Alert on it and repeat attended authorization before expiry.

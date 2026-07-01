@@ -25,6 +25,7 @@ class DeliveryStatus(str, Enum):
     PENDING = "pending"
     ACKNOWLEDGED = "acknowledged"
     UNKNOWN = "unknown"
+    REJECTED = "rejected"
 
 
 @dataclass
@@ -47,6 +48,8 @@ class Edition:
     messages: tuple[str, ...] = ()
     deliveries: Dict[int, DeliveryRecord] = field(default_factory=dict)
     missed: bool = False
+    edition_id: str = ""
+    terminal_status: Optional[str] = None
 
 
 def edition_hash(messages: Sequence[str]) -> str:
@@ -75,6 +78,7 @@ class InMemoryEditionStore:
             current = self._editions.get(run_date)
             if current is None:
                 current = Edition(run_date, owner, now + ttl)
+                current.edition_id = f"digest-{run_date.isoformat()}-0800-kst"
                 self._editions[run_date] = current
             elif current.lease_owner != owner:
                 if current.lease_expires_at > now or current.delivery_started_at is not None:
@@ -110,6 +114,8 @@ class InMemoryEditionStore:
                 raise StateConflict("freeze content before delivery")
             if any(r.status == DeliveryStatus.UNKNOWN for r in edition.deliveries.values()):
                 raise DeliveryBlocked("unknown dispatch requires manual reconciliation")
+            if edition.terminal_status:
+                raise DeliveryBlocked("edition is terminal: " + edition.terminal_status)
             existing = edition.deliveries.get(position)
             if existing and existing.status == DeliveryStatus.ACKNOWLEDGED:
                 return
@@ -121,13 +127,17 @@ class InMemoryEditionStore:
 
     def resolve(self, run_date: date, owner: str, position: int,
                 status: DeliveryStatus, now: datetime) -> None:
-        if status not in (DeliveryStatus.ACKNOWLEDGED, DeliveryStatus.UNKNOWN):
-            raise ValueError("pending may resolve only to acknowledged or unknown")
+        if status not in (DeliveryStatus.ACKNOWLEDGED, DeliveryStatus.UNKNOWN,
+                          DeliveryStatus.REJECTED):
+            raise ValueError("invalid terminal delivery status")
         with self._lock:
             record = self._owned(run_date, owner).deliveries[position]
             if record.status != DeliveryStatus.PENDING:
                 raise StateConflict("only pending delivery can resolve")
             record.status, record.updated_at = status, now
+            if status == DeliveryStatus.REJECTED:
+                edition = self._owned(run_date, owner)
+                edition.terminal_status = "failed"
 
     def recover_stale_pending(self, run_date: date, now: datetime,
                               stale_after: timedelta = timedelta(minutes=5)) -> int:
