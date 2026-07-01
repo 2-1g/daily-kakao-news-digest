@@ -51,3 +51,10 @@ No new dependencies or architecture changes are permitted in this pass.
 2. Remove citation-building duplication and add precise source typing.
 3. Expand compact runtime-hardening fixtures for readable failure diagnostics.
 4. Run the full suite, compileall, static dangerous-call scan, and diff checks.
+
+## Final scoped pass (`803a7cf`, `3729465`)
+
+- Baseline: 90 tests pass.
+- Scope: strict extractive grounding plus durable OAuth rotation aliases and production logging.
+- Fallback review: broad catches around refresh wrapping, phase-proof rollback, and Secret Manager CAS all preserve causality or re-raise non-conflicts; they are grounded security/compatibility boundaries, not masking fallbacks.
+- Necessary cleanup only: reuse the single Secret Manager alias-CAS helper instead of maintaining duplicate CAS code, tighten the recovered-version return type, and remove the now-unused `analysis` argument from strict grounding validation.

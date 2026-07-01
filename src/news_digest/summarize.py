@@ -55,7 +55,7 @@ def parse_synthesis(cluster: EventCluster, raw: str) -> DigestItem:
         if not isinstance(analysis, bool):
             raise ValueError("analysis flag must be boolean")
         cited = [item.text for item in evidence if item.evidence_id in ids]
-        if not any(_claim_supported(text, source, analysis) for source in cited):
+        if not any(_claim_supported(text, source) for source in cited):
             raise ValueError("clause is not extractively supported by one cited evidence item")
         clauses.append(GroundedClause(text.strip(), tuple(ids), analysis))
     if not clauses:
@@ -98,7 +98,7 @@ def _markers(pattern: re.Pattern[str], text: str) -> tuple[str, ...]:
     return tuple(match.group(0).lower() for match in pattern.finditer(text))
 
 
-def _claim_supported(claim: str, evidence: str, analysis: bool) -> bool:
+def _claim_supported(claim: str, evidence: str) -> bool:
     claim_tokens = _tokens(claim)
     evidence_tokens = _tokens(evidence)
     if not claim_tokens:

@@ -6,7 +6,7 @@ not require Google packages or application-default credentials.
 
 import json
 from datetime import date, datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .auth import OAuthToken
 from .state import DeliveryRecord, DeliveryStatus, Edition, InMemoryEditionStore
@@ -63,27 +63,8 @@ class SecretManagerTokenStore:
     def compare_and_set_active(self, expected: str, new: str) -> bool:
         if self.alias_cas is not None:
             return bool(self.alias_cas(expected, new))
-        secret = self.client.get_secret(request={"name": self.parent})
-        aliases = dict(getattr(secret, "version_aliases", {}))
-        if str(aliases.get(self.active_alias)) != str(expected):
-            return False
-        if (self.client.__class__.__module__.startswith("google.") and
-                not getattr(secret, "etag", None)):
-            raise RuntimeError("Secret Manager CAS requires a resource etag")
-        aliases[self.active_alias] = int(new)
-        secret.version_aliases = aliases
-        # update_secret honors the etag present on the resource and rejects a
-        # concurrent alias update rather than overwriting it.
-        try:
-            self.client.update_secret(request={"secret": secret,
-                                               "update_mask": {"paths": ["version_aliases"]}})
-        except Exception as exc:
-            # Secret Manager exposes optimistic-lock failures as Aborted or
-            # FailedPrecondition. Normalize those races to a recoverable CAS miss.
-            if exc.__class__.__name__ in ("Aborted", "FailedPrecondition", "Conflict"):
-                return False
-            raise
-        return True
+        return self._update_rotation_aliases(
+            {self.active_alias: new}, expected_active=expected)
 
     @staticmethod
     def _is_conflict(exc: Exception) -> bool:
@@ -150,7 +131,7 @@ class SecretManagerTokenStore:
             raise
         return True
 
-    def unproven_previous(self, active: str) -> Any:
+    def unproven_previous(self, active: str) -> Optional[str]:
         """Recover rotation context after process restart from durable aliases."""
         secret = self.client.get_secret(request={"name": self.parent})
         aliases = dict(getattr(secret, "version_aliases", {}))
