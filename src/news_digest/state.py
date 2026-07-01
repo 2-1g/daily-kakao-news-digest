@@ -33,6 +33,7 @@ class DeliveryRecord:
     text: str
     status: DeliveryStatus
     updated_at: datetime
+    reconciliation_reason: Optional[str] = None
 
 
 @dataclass
@@ -138,6 +139,24 @@ class InMemoryEditionStore:
                     changed += 1
             return changed
 
+    def reconcile_unknown_as_acknowledged(self, run_date: date, position: int,
+                                          now: datetime, reason: str) -> None:
+        """Operator-only reconciliation after inspecting Kakao self-chat.
+
+        Persistent adapters should bind this operation to operator IAM and retain
+        ``reason`` in their audit log. It deliberately cannot authorize a resend.
+        """
+        if not reason.strip():
+            raise ValueError("an operator audit reason is required")
+        with self._lock:
+            edition = self._editions[run_date]
+            record = edition.deliveries[position]
+            if record.status != DeliveryStatus.UNKNOWN:
+                raise StateConflict("only unknown delivery can be reconciled")
+            record.status = DeliveryStatus.ACKNOWLEDGED
+            record.updated_at = now
+            record.reconciliation_reason = reason.strip()
+
     def get(self, run_date: date) -> Optional[Edition]:
         return self._editions.get(run_date)
 
@@ -146,4 +165,3 @@ class InMemoryEditionStore:
         if edition.lease_owner != owner:
             raise StateConflict("edition is owned by another worker")
         return edition
-
