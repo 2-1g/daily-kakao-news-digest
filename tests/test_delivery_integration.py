@@ -221,11 +221,11 @@ class OAuthRotationIntegrationTests(unittest.TestCase):
         result = OAuthManager(store, Refresher(token(refresh="rotated"))).valid_access_token(NOW)
         self.assertEqual(("2", "1"), (result.active_version, result.previous_version))
         self.assertEqual("2", store.active_version())
-        self.assertIn("2", store.successful)
+        self.assertNotIn("2", store.successful)
         self.assertNotIn("1", store.retired)
 
     def test_rotation_crashes_at_each_phase_without_losing_last_usable_token(self):
-        for phase in ("create", "verify", "compare_and_set_active", "mark_successful_use"):
+        for phase in ("create", "verify", "compare_and_set_active"):
             with self.subTest(phase=phase):
                 class CrashStore(InMemoryTokenStore):
                     def __getattribute__(self, name):
@@ -244,6 +244,21 @@ class OAuthRotationIntegrationTests(unittest.TestCase):
                 self.assertIn(store.active_version(), store.versions)
                 self.assertIn("1", store.versions)
                 self.assertNotIn("1", store.retired)
+
+    def test_success_marker_failure_after_acceptance_does_not_authorize_resend(self):
+        class MarkerCrashStore(InMemoryTokenStore):
+            def mark_successful_use(self, version):
+                raise RuntimeError("marker unavailable")
+
+        store = MarkerCrashStore(token())
+        transport = Transport()
+        app = DigestPipeline(InMemoryEditionStore(), OAuthManager(store, Refresher(token())),
+                             KakaoClient(transport), Clock())
+        with self.assertRaisesRegex(RuntimeError, "marker unavailable"):
+            app.run("one", ["accepted"])
+        # ACK persistence precedes the operational marker, so a retry is a no-op.
+        self.assertEqual("acknowledged", app.run("one", ["accepted"]).status)
+        self.assertEqual(["accepted"], transport.sent)
 
 
 if __name__ == "__main__":

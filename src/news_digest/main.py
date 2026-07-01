@@ -7,7 +7,7 @@ import socket
 import logging
 import time
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -20,11 +20,13 @@ from .http import KakaoHttpTransport, KakaoOAuthHttpRefresher, UrllibHttpClient
 from .kakao import KakaoClient, validate_messages
 from .pipeline import DigestPipeline
 from .rank import rank_clusters
+from .rank import editorial_metrics as rank_editorial_metrics
 from .sources import GdeltAdapter, NaverAdapter
 from .summarize import summarize
 from .model_summarizer import BudgetedModelSummarizer, OpenAIResponsesClient, prices_from_json
 from .operator import authorization_url, bootstrap_token, reconcile_delivery
 from .logging import log_event
+from .state import kst_run_date
 
 
 def _env(name: str, required: bool = True) -> str:
@@ -34,7 +36,7 @@ def _env(name: str, required: bool = True) -> str:
     return value
 
 
-def collect_and_compose() -> List[str]:
+def collect_and_compose(emit=None) -> List[str]:
     """Lawful deterministic production path; configured sources still fail closed."""
     registry = ComplianceRegistry.from_path(Path(os.environ.get(
         "SOURCE_REGISTRY", "config/sources.yaml")))
@@ -63,6 +65,16 @@ def collect_and_compose() -> List[str]:
         items = summarizer.summarize_all(clusters)
     else:
         items = [summarize(cluster) for cluster in clusters]
+    if emit is not None:
+        metrics = rank_editorial_metrics(clusters)
+        supported = sum(bool(item.sources) and all(clause.evidence_ids for clause in item.clauses)
+                        for item in items)
+        emit("digest_editorial_metrics", source_concentration=metrics.max_publisher_share,
+             evidence_coverage=supported / len(items) if items else 0.0,
+             domestic_ratio=metrics.domestic_share,
+             investment_ratio=metrics.investment_share,
+             source_count=metrics.publisher_count, item_count=metrics.item_count,
+             estimated_cost_ceiling_usd=os.environ.get("MODEL_MAX_RUN_USD", "0.10"))
     return list(DigestComposer().compose(items, today.isoformat()).messages)
 
 
@@ -72,9 +84,20 @@ def run_cloud() -> int:
     emit = lambda event, **fields: log_event(logger, event, **fields)
     project = _env("GOOGLE_CLOUD_PROJECT")
     messages_file = os.environ.get("NEWS_DIGEST_MESSAGES_FILE")
-    messages = _read_messages(Path(messages_file)) if messages_file else collect_and_compose()
     live = os.environ.get("NEWS_DIGEST_LIVE_SEND", "false").lower() == "true"
     store = FirestoreEditionStore(project)
+    owner = os.environ.get("CLOUD_RUN_EXECUTION", socket.gethostname())
+    if messages_file:
+        messages = _read_messages(Path(messages_file))
+    else:
+        # Acquire and extend before source/model work, not only before delivery.
+        # The 20-minute stage lease covers the configured 15-minute Cloud Run job.
+        collected_at = datetime.now(timezone.utc)
+        run_date = kst_run_date(collected_at)
+        store.acquire(run_date, owner, collected_at)
+        store.heartbeat(run_date, owner, collected_at, timedelta(minutes=20))
+        messages = collect_and_compose(emit)
+        store.heartbeat(run_date, owner, datetime.now(timezone.utc), timedelta(minutes=20))
     token_store = SecretManagerTokenStore(project, _env("KAKAO_TOKEN_SECRET"))
     oauth = OAuthManager(token_store, KakaoOAuthHttpRefresher(
         _env("KAKAO_CLIENT_ID"), _env("KAKAO_CLIENT_SECRET", False)), emit)
@@ -84,8 +107,7 @@ def run_cloud() -> int:
     # enabling structured production events on the concrete implementation.
     if hasattr(pipeline, "event_sink"):
         pipeline.event_sink = emit
-    result = pipeline.run(os.environ.get("CLOUD_RUN_EXECUTION", socket.gethostname()),
-                          messages, dry_run=not live)
+    result = pipeline.run(owner, messages, dry_run=not live)
     emit("digest_runtime_metrics", status=result.status,
          duration_seconds=round(time.monotonic() - started, 3),
          message_count=len(messages), character_count=sum(map(len, messages)),
