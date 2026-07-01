@@ -19,7 +19,13 @@ An acknowledged edition rerun is a no-op. A stale `pending` checkpoint is
 promoted to `unknown`, never interpreted as unsent.
 # Adapter operation
 
-The operator-authorized persistence command must call
+> **Implementation status:** no reconciliation CLI is currently exposed. Do
+> not edit Firestore by hand: that can bypass transition validation and audit
+> fields. Until an authenticated operator command is implemented and tested,
+> leave the edition `unknown`, keep automatic delivery suspended, and accept the
+> missed briefing.
+
+The future operator-authorized persistence command must call
 `reconcile_unknown_as_acknowledged(run_date, position, now, reason)`. A nonempty
 audit reason is mandatory. The operation only supports `unknown` to
 `acknowledged`; it cannot return a message to `pending` or authorize resend.

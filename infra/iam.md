@@ -5,7 +5,7 @@ project-wide Editor/Owner to an application identity.
 
 | Identity | Required access | Explicitly excluded |
 |---|---|---|
-| `news-digest-runtime` | Firestore document read/write for edition and rotation metadata; Secret Manager accessor on the active Kakao token and OpenAI key only; logs writer | secret version creation/destruction, OAuth bootstrap credentials, Cloud Run administration |
+| `news-digest-runtime` | Firestore document read/write for edition and rotation metadata; Secret Manager accessor on the active Kakao token only; logs writer | secret version creation/destruction, OAuth bootstrap authorization codes, unrelated credentials, Cloud Run administration |
 | `news-digest-scheduler` | `run.jobs.run` on this job only; service-account token creation for itself | Firestore, secrets, other jobs |
 | `news-digest-bootstrap` | access to Kakao bootstrap client secret and permission to add a candidate token version | runtime execution, unrelated secrets |
 | human operator | deploy job/config, inspect structured status, reconcile unknown sends, suspend scheduler, rotate/retire versions | routine application execution with bootstrap credentials |

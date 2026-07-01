@@ -24,12 +24,10 @@ spec:
                   value: PROJECT_ID
                 - name: KAKAO_TOKEN_SECRET
                   value: kakao-token-active
-                - name: OPENAI_API_KEY_SECRET
-                  value: openai-api-key
                 - name: EDITION_TIMEZONE
                   value: Asia/Seoul
-                - name: MODEL_RUN_BUDGET_USD
-                  value: "0.10"
+                # No model is called by the current implementation. Add model
+                # credentials only after the tested $0.10/run guard exists.
                 # Delivery remains a safe dry run until the operator explicitly
                 # changes this after the authorized Kakao smoke test.
                 - name: NEWS_DIGEST_LIVE_SEND

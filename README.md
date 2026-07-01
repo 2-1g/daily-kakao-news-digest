@@ -1,8 +1,18 @@
 # Daily Kakao News Digest
 
-This repository implements the approved daily personal news-digest plan in
-small, testable slices. It includes fail-closed source adapters, deterministic
+This repository implements the executable core of the approved daily personal
+news-digest plan. It includes fail-closed source adapters, deterministic
 editorial composition, conservative delivery state, and Google Cloud adapters.
+
+## Current readiness
+
+Local payload validation and the automated tests are ready. **Unattended live
+operation is not ready out of the box:** the sample source policies are
+unapproved, OAuth bootstrap/reconciliation are adapter operations rather than
+operator CLI commands, cloud billing alerts are not provisioned by this repo,
+and no authorized live Kakao smoke test has been run. Never enable live sending
+until the checklist in [`docs/runbooks/deployment.md`](docs/runbooks/deployment.md)
+is complete.
 
 ## Safety boundary
 
@@ -17,11 +27,28 @@ editorial composition, conservative delivery state, and Google Cloud adapters.
 
 ## Commands
 
-Local, network-free payload validation:
+Create a virtual environment and install the package (cloud extras are required
+only for the Cloud Run path):
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
+# Cloud adapters: python -m pip install -e '.[cloud]'
+```
+
+Local, network-free payload validation (the file is a JSON list of final Kakao
+message strings):
 
 ```bash
 news-digest --dry-run --messages ./messages.json
 ```
+
+This command validates only message count/length and performs no collection,
+Firestore, Secret Manager, OAuth, or Kakao network call. `news-digest run
+--dry-run` is different: it constructs cloud adapters and therefore requires
+Google credentials and configured source credentials (or
+`NEWS_DIGEST_MESSAGES_FILE`).
 
 Cloud Run's manifest invokes `news-digest run`. This loads Firestore and Secret
 Manager adapters and either collects approved sources or reads the optional
@@ -35,6 +62,14 @@ collection and named Kakao token secret. Secret Manager's `active` version
 alias is the authoritative token pointer; a previous version remains enabled
 for rollback/grace retirement.
 
+Operational procedures:
+
+- [Google Cloud deployment checklist](docs/runbooks/deployment.md)
+- [source compliance approval](docs/runbooks/source-approval.md)
+- [Kakao OAuth bootstrap limitations](docs/runbooks/oauth-bootstrap.md)
+- [manual `unknown` reconciliation](docs/runbooks/manual-reconciliation.md)
+- [budget alerts and suspension](docs/runbooks/budget-suspension.md)
+
 ## Test
 
 ```bash
@@ -44,3 +79,9 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 `config/sources.yaml` is JSON-compatible YAML so it can be loaded with the
 Python standard library. Its sample entries are intentionally unapproved until
 an operator verifies current terms and fills every required compliance field.
+
+The implementation currently uses deterministic extractive summaries; it does
+not call an LLM. The planned `$0.10` per-run model guard must be implemented and
+tested before adding model calls. The `$5/month` budget is an asynchronous
+Google Cloud Billing alert policy plus a manual suspension procedure, not a
+synchronous spending cap.
