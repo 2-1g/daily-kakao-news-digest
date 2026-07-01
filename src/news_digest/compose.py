@@ -14,6 +14,7 @@ DISCLAIMER = "※ 정보 제공용이며 투자 권유가 아닙니다."
 @dataclass(frozen=True)
 class ComposedDigest:
     messages: tuple[str, ...]
+    insufficient_source_diversity: bool = False
 
     @property
     def total_chars(self) -> int:
@@ -27,10 +28,15 @@ class DigestComposer:
     def compose(self, items: Iterable[DigestItem], edition: str = "오늘") -> ComposedDigest:
         items = tuple(items)
         bodies = ["📰 %s 주요 뉴스" % edition]
+        all_publishers = {source.publisher for item in items for source in item.sources}
+        insufficient = bool(items) and len(all_publishers) < 2
+        if insufficient:
+            bodies[0] += "\n※ 오늘은 확인 가능한 독립 출처가 부족합니다."
         for item in items:
-            source = item.sources[0]
             facts = " ".join(("[분석] " if c.analysis else "") + c.text for c in item.clauses)
-            body = self._fit_item(item.headline, facts, source.publisher, source.url)
+            cited_ids = {evidence_id for clause in item.clauses for evidence_id in clause.evidence_ids}
+            sources = tuple(source for source in item.sources if source.evidence_id in cited_ids)
+            body = self._fit_item(item.headline, facts, sources)
             if body:
                 bodies.append(body)
             if len(bodies) >= self.max_messages - 1:
@@ -45,13 +51,23 @@ class DigestComposer:
                 raise ValueError("mandatory message exceeds Kakao limit")
             bodies.pop(oversize)
             numbered = self._number(bodies)
-        return ComposedDigest(tuple(numbered))
+        return ComposedDigest(tuple(numbered), insufficient)
 
-    def _fit_item(self, headline: str, facts: str, publisher: str, url: str) -> str | None:
+    def _fit_item(self, headline: str, facts: str, sources) -> str | None:
         """Compress prose, never a URL, so displayed links remain usable."""
-        suffix = "\n%s · %s" % (publisher, url)
         payload_limit = self.max_chars - 8  # reserve stable room for "[18/18] "
-        if len(suffix) + 12 > payload_limit:
+        suffixes = ["\n%s · %s" % (source.publisher, source.url) for source in sources]
+        # Keep at least two independent corroborating citations when they fit;
+        # discard only citations whose URL itself makes a Kakao-safe item impossible.
+        suffix = ""
+        seen_publishers = set()
+        for source, candidate in zip(sources, suffixes):
+            if source.publisher in seen_publishers:
+                continue
+            if len(suffix + candidate) + 12 <= payload_limit:
+                suffix += candidate
+                seen_publishers.add(source.publisher)
+        if not suffix:
             return None
         available = payload_limit - len(suffix)
         headline = self._clip(headline, min(len(headline), max(12, available // 2)))

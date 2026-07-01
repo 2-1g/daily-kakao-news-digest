@@ -14,7 +14,7 @@ from news_digest.models import (
     GroundedClause,
 )
 from news_digest.normalize import normalize_url
-from news_digest.rank import RankConfig, rank_clusters, score_cluster
+from news_digest.rank import RankConfig, editorial_metrics, rank_clusters, score_cluster
 from news_digest.summarize import deterministic_fallback, parse_synthesis, summarize
 
 
@@ -104,6 +104,19 @@ class ClusteringTests(unittest.TestCase):
         self.assertEqual(("copy.kr",), groups[0].syndicated_publishers)
         self.assertEqual(("independent.kr", "origin.kr"), groups[0].independent_publishers)
 
+    def test_editorial_dimensions_are_deterministically_inferred(self):
+        domestic = cluster_articles((article(
+            "한국은행 기준금리 동결, 코스피 영향 주목", "a.kr", region=None,
+        ),))[0]
+        entertainment = cluster_articles((article(
+            "해외 배우 신작 영화 공개", "b.com", region=None,
+        ),))[0]
+        self.assertEqual(("economy", "domestic", True),
+                         (domestic.category, domestic.region, domestic.investment_relevance))
+        self.assertEqual(("entertainment", "overseas", False),
+                         (entertainment.category, entertainment.region,
+                          entertainment.investment_relevance))
+
 
 class RankingTests(unittest.TestCase):
     def test_independent_confirmation_raises_score(self):
@@ -142,6 +155,24 @@ class RankingTests(unittest.TestCase):
         )
         self.assertEqual((1, 5, 10), (len(quiet), len(normal), len(major)))
 
+    def test_multi_publisher_pool_cannot_emit_single_publisher_digest(self):
+        dominant = cluster("dominant", "one.kr", score="1")
+        alternate = cluster("alternate", "two.kr", score=".9")
+        selected = rank_clusters((dominant, alternate), NOW,
+                                 RankConfig(minimum_score=0, max_items=1))
+        self.assertEqual((), selected)
+
+    def test_diversity_metrics_expose_quiet_day_shortage_and_ratios(self):
+        one = cluster("one", "one.kr", region="domestic", investment=True)
+        quiet = editorial_metrics((one,), approved_publishers=("one.kr",))
+        self.assertTrue(quiet.insufficient_source_diversity)
+        self.assertEqual((1.0, 1.0, 1.0),
+                         (quiet.max_publisher_share, quiet.domestic_share, quiet.investment_share))
+        diverse = editorial_metrics((one, cluster("two", "two.kr", region="overseas")),
+                                    approved_publishers=("one.kr", "two.kr"))
+        self.assertFalse(diverse.insufficient_source_diversity)
+        self.assertEqual(2, diverse.publisher_count)
+
 
 class GroundingTests(unittest.TestCase):
     def setUp(self):
@@ -170,6 +201,14 @@ class GroundingTests(unittest.TestCase):
         ]})
         with self.assertRaises(ValueError):
             parse_synthesis(self.cluster, advice)
+
+    def test_valid_evidence_id_cannot_launder_an_invented_claim(self):
+        invented = json.dumps({"headline": "요약", "clauses": [{
+            "text": "화성에서 외계 생명체가 발견됐습니다.",
+            "evidence_ids": ["E1"], "analysis": False,
+        }]})
+        with self.assertRaises(ValueError):
+            parse_synthesis(self.cluster, invented)
 
 
 class KakaoCompositionTests(unittest.TestCase):
@@ -220,6 +259,24 @@ class KakaoCompositionTests(unittest.TestCase):
         digest = composer.compose(tuple(item(i) for i in range(10)))
         self.assert_contract(digest)
         self.assertLessEqual(digest.total_chars, 80)
+
+    def test_multiple_corroborating_citations_are_displayed(self):
+        sources = (
+            Evidence("E1", "정책 변화", "a.kr", "https://a.kr/x"),
+            Evidence("E2", "정책 변화", "b.kr", "https://b.kr/y"),
+        )
+        digest_item = DigestItem(
+            "multi", "정책 변화", (GroundedClause("정책 변화", ("E1", "E2")),), sources,
+        )
+        digest = DigestComposer().compose((digest_item,))
+        self.assertIn("a.kr · https://a.kr/x", digest.messages[1])
+        self.assertIn("b.kr · https://b.kr/y", digest.messages[1])
+        self.assertFalse(digest.insufficient_source_diversity)
+
+    def test_quiet_day_single_source_is_explicit(self):
+        digest = DigestComposer().compose((item(1),))
+        self.assertTrue(digest.insufficient_source_diversity)
+        self.assertIn("독립 출처가 부족", digest.messages[0])
 
 
 if __name__ == "__main__":

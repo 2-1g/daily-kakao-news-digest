@@ -18,6 +18,30 @@ class RankConfig:
     investment_target: float = 0.4
 
 
+@dataclass(frozen=True)
+class EditorialMetrics:
+    item_count: int
+    publisher_count: int
+    max_publisher_share: float
+    domestic_share: float
+    investment_share: float
+    insufficient_source_diversity: bool
+
+
+def editorial_metrics(selected: Iterable[EventCluster], approved_publishers: Iterable[str] = ()) -> EditorialMetrics:
+    items = tuple(selected)
+    counts = {publisher: sum(c.primary.publisher == publisher for c in items)
+              for publisher in {c.primary.publisher for c in items}}
+    total = len(items)
+    approved = set(approved_publishers)
+    return EditorialMetrics(
+        total, len(counts), max(counts.values(), default=0) / total if total else 0.0,
+        sum(c.region == "domestic" for c in items) / total if total else 0.0,
+        sum(c.investment_relevance for c in items) / total if total else 0.0,
+        bool(items) and len(counts) == 1 and len(approved) < 2,
+    )
+
+
 def rank_clusters(clusters: Iterable[EventCluster], now: datetime | None = None,
                   config: RankConfig = RankConfig()) -> tuple[EventCluster, ...]:
     now = now or datetime.now(timezone.utc)
@@ -26,6 +50,7 @@ def rank_clusters(clusters: Iterable[EventCluster], now: datetime | None = None,
     scored = sorted(((score_cluster(c, now), c) for c in clusters),
                     key=lambda pair: (-pair[0], pair[1].event_id))
     candidates = [(score, cluster) for score, cluster in scored if score >= config.minimum_score]
+    eligible_publishers = {cluster.primary.publisher for _, cluster in candidates}
     chosen: list[EventCluster] = []
     publisher_counts: dict[str, int] = {}
     while candidates and len(chosen) < config.max_items:
@@ -39,6 +64,9 @@ def rank_clusters(clusters: Iterable[EventCluster], now: datetime | None = None,
             continue
         chosen.append(cluster)
         publisher_counts[publisher] = projected
+    # A multi-source pool must never silently become a single-publisher edition.
+    if len(eligible_publishers) > 1 and len({c.primary.publisher for c in chosen}) < 2:
+        return ()
     return tuple(chosen)
 
 

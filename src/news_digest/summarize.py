@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Mapping
 
 from .models import DigestItem, Evidence, EventCluster, GroundedClause
 
 
 FORBIDDEN_ADVICE = ("매수", "매도", "사야", "팔아", "추천 종목", "투자하세요")
+SUPPORT_TOKEN = re.compile(r"[0-9A-Za-z가-힣]{2,}")
+SUPPORT_STOP = {"그리고", "그러나", "대한", "관련", "있습니다", "했습니다", "것으로", "영향은", "전망"}
 
 
 def build_evidence(cluster: EventCluster) -> tuple[Evidence, ...]:
@@ -47,6 +50,9 @@ def parse_synthesis(cluster: EventCluster, raw: str) -> DigestItem:
             raise ValueError("investment recommendation rejected")
         if not isinstance(analysis, bool):
             raise ValueError("analysis flag must be boolean")
+        cited_text = " ".join(item.text for item in evidence if item.evidence_id in ids)
+        if not _claim_supported(text, cited_text, analysis):
+            raise ValueError("clause is not lexically supported by cited evidence")
         clauses.append(GroundedClause(text.strip(), tuple(ids), analysis))
     if not clauses:
         raise ValueError("empty synthesis")
@@ -70,3 +76,20 @@ def summarize(cluster: EventCluster, response: str | None = None) -> DigestItem:
         except (ValueError, TypeError, json.JSONDecodeError):
             pass
     return deterministic_fallback(cluster)
+
+
+def _tokens(text: str) -> set[str]:
+    return {token.lower() for token in SUPPORT_TOKEN.findall(text)
+            if token.lower() not in SUPPORT_STOP}
+
+
+def _claim_supported(claim: str, evidence: str, analysis: bool) -> bool:
+    claim_tokens = _tokens(claim)
+    evidence_tokens = _tokens(evidence)
+    if not claim_tokens:
+        return False
+    overlap = len(claim_tokens & evidence_tokens) / len(claim_tokens)
+    # Analysis may add cautious connective language, but still needs a concrete
+    # evidence anchor; factual clauses require most material tokens to be present.
+    threshold = 0.25 if analysis else 0.55
+    return bool(claim_tokens & evidence_tokens) and overlap >= threshold
