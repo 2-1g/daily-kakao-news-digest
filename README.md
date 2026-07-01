@@ -7,9 +7,9 @@ editorial composition, conservative delivery state, and Google Cloud adapters.
 ## Current readiness
 
 Local payload validation and the automated tests are ready. **Unattended live
-operation is not ready out of the box:** sample source policies are unapproved,
-operator CLIs still require reviewed IAM/credentials, the budget artifact has
-not been applied, and no authorized live Kakao smoke test has run. Never enable live sending
+operation is not ready out of the box:** source approvals are time-limited,
+operator OAuth still requires an attended consent, and no authorized live Kakao
+smoke test has run. Never enable live sending
 until the checklist in [`docs/runbooks/deployment.md`](docs/runbooks/deployment.md)
 is complete.
 
@@ -85,8 +85,8 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
 `config/sources.yaml` is JSON-compatible YAML so it can be loaded with the
-Python standard library. Its sample entries are intentionally unapproved until
-an operator verifies current terms and fills every required compliance field.
+Python standard library. Its approvals are deliberately short-lived and must
+be re-reviewed before their recorded expiry date.
 
 The default uses deterministic extractive summaries. Model synthesis requires
 an explicit opt-in, nano/mini names, API key, and reviewed price JSON. Evidence

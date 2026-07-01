@@ -21,11 +21,12 @@ def policy(**overrides):
 
 
 class ComplianceTests(unittest.TestCase):
-    def test_repository_registry_is_valid_but_not_approved(self):
+    def test_repository_registry_approval_is_short_lived(self):
         path = Path(__file__).parents[1] / "config" / "sources.yaml"
         loaded = ComplianceRegistry.from_path(path)
+        loaded.require("naver-news", date(2026, 7, 1), ["title"])
         with self.assertRaises(ComplianceError):
-            loaded.require("naver-news", date(2026, 7, 1), ["title"])
+            loaded.require("naver-news", date(2026, 8, 2), ["title"])
 
     def test_unknown_unapproved_expired_and_disallowed_fail_closed(self):
         cases = [

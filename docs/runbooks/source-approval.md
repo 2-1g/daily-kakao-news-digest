@@ -1,8 +1,8 @@
 # Source compliance approval
 
 Collection fails closed unless every used entry in `config/sources.yaml` is
-explicitly approved and unexpired. The checked-in Naver and GDELT examples are
-deliberately `approved: false` and expired; this is a safe deployment blocker.
+explicitly approved and unexpired. Checked-in approvals are short-lived review
+records, not permanent permission; expiry is a safe deployment blocker.
 
 For each source, an accountable operator must review the current upstream terms
 and record:

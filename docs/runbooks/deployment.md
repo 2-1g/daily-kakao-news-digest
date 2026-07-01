@@ -34,8 +34,9 @@ reviewed deployment; never add literal values to `infra/cloudrun-job.yaml`.
 
 ## 3. Source and cost gates
 
-Complete [source approval](source-approval.md). Configure a USD $5/month Cloud
-Billing Budget with asynchronous 50/80/100% alerts and validate the recipient.
+Complete [source approval](source-approval.md). Configure an approximately USD
+$5/month Cloud Billing Budget in the billing account currency, with asynchronous
+50/80/100% alerts, and validate the recipient.
 Follow [budget suspension](budget-suspension.md) at 100%. Model synthesis is
 opt-in and requires a reviewed explicit price table; keep it disabled for the
 first cloud dry run.
