@@ -5,7 +5,8 @@ from datetime import datetime
 from typing import Callable, Sequence
 
 from .auth import OAuthManager
-from .kakao import AmbiguousDeliveryError, KakaoClient, validate_messages
+from .kakao import (AmbiguousDeliveryError, DefiniteDeliveryError, KakaoClient,
+                    validate_messages)
 from .state import (DeliveryBlocked, DeliveryStatus, InMemoryEditionStore,
                     edition_window_open, kst_run_date)
 
@@ -50,8 +51,12 @@ class DigestPipeline:
             except AmbiguousDeliveryError:
                 self.store.resolve(run_date, owner, envelope.position, DeliveryStatus.UNKNOWN, self.clock())
                 return RunResult("unknown", sent, digest)
+            except DefiniteDeliveryError:
+                # Delivery has begun, so even a definite rejection is terminal for this
+                # frozen edition. Record a blocking state rather than leaving stale pending.
+                self.store.resolve(run_date, owner, envelope.position, DeliveryStatus.UNKNOWN, self.clock())
+                return RunResult("terminal_delivery_failure", sent, digest)
             self.store.resolve(run_date, owner, envelope.position,
                                DeliveryStatus.ACKNOWLEDGED, self.clock())
             sent += 1
         return RunResult("acknowledged", sent, digest)
-
