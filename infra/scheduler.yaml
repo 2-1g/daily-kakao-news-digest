@@ -1,0 +1,13 @@
+name: projects/PROJECT_ID/locations/REGION/jobs/daily-kakao-news-digest
+description: Invoke the private digest Cloud Run Job at 08:00 KST without platform retries.
+schedule: "0 8 * * *"
+timeZone: Asia/Seoul
+attemptDeadline: 900s
+retryConfig:
+  retryCount: 0
+httpTarget:
+  uri: https://REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/PROJECT_ID/jobs/daily-kakao-news-digest:run
+  httpMethod: POST
+  oauthToken:
+    serviceAccountEmail: news-digest-scheduler@PROJECT_ID.iam.gserviceaccount.com
+    scope: https://www.googleapis.com/auth/cloud-platform

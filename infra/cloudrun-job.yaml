@@ -1,0 +1,36 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: daily-kakao-news-digest
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      taskCount: 1
+      template:
+        spec:
+          serviceAccountName: news-digest-runtime@PROJECT_ID.iam.gserviceaccount.com
+          maxRetries: 0
+          timeoutSeconds: "900"
+          containers:
+            - image: REGION-docker.pkg.dev/PROJECT_ID/news-digest/app:IMAGE_TAG
+              args: ["run"]
+              env:
+                - name: GOOGLE_CLOUD_PROJECT
+                  value: PROJECT_ID
+                - name: KAKAO_TOKEN_SECRET
+                  value: kakao-token-active
+                - name: OPENAI_API_KEY_SECRET
+                  value: openai-api-key
+                - name: EDITION_TIMEZONE
+                  value: Asia/Seoul
+                - name: MODEL_RUN_BUDGET_USD
+                  value: "0.10"
+              resources:
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
