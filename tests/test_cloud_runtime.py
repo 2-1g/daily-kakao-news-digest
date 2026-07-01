@@ -124,6 +124,27 @@ class CloudPersistenceTests(unittest.TestCase):
         self.assertFalse(store.compare_and_set_active("stale", version))
         self.assertEqual("1", store.active_version())
 
+    def test_rotation_phase_success_and_rollback_are_durable_aliases(self):
+        old = OAuthToken("a1", "r1", NOW)
+        client = SecretClient(old)
+        store = SecretManagerTokenStore("project", "token", client=client)
+        candidate = store.create(OAuthToken("a2", "r2", NOW))
+        store.record_rotation_phase(candidate, "candidate_created", {"previous": "1"})
+        self.assertEqual(2, client.aliases["rotation-candidate-created"])
+        self.assertEqual(1, client.aliases["rotation-previous"])
+        self.assertTrue(store.compare_and_set_active("1", candidate))
+        self.assertEqual("1", store.unproven_previous(candidate))
+        self.assertTrue(store.rollback_if_unproven(candidate, "1"))
+        self.assertEqual(1, client.aliases["active"])
+        self.assertEqual(2, client.aliases["rotation-rolled-back"])
+
+        self.assertTrue(store.compare_and_set_active("1", candidate))
+        store.mark_successful_use(candidate)
+        self.assertIsNone(store.unproven_previous(candidate))
+        self.assertEqual(2, client.aliases["rotation-proven"])
+        self.assertFalse(store.rollback_if_unproven(candidate, "1"))
+        self.assertEqual(2, client.aliases["active"])
+
     def test_edition_serialization_round_trip_preserves_frozen_delivery_state(self):
         store = FirestoreEditionStore("project", client=FirestoreClient(),
                                       transaction_runner=AtomicRunner())

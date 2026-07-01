@@ -1,9 +1,13 @@
 import unittest
+import io
+import json
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 from news_digest.auth import InMemoryTokenStore, OAuthManager, OAuthToken
 from news_digest.kakao import DefiniteDeliveryError, KakaoClient
 from news_digest.pipeline import DigestPipeline
+from news_digest.logging import configure_production_logging, log_event
 from news_digest.state import DeliveryBlocked, DeliveryStatus, InMemoryEditionStore, StateConflict
 
 NOW = datetime(2026, 7, 1, 23, 0, tzinfo=timezone.utc)
@@ -78,6 +82,19 @@ class RuntimeHardeningTests(unittest.TestCase):
         manager.valid_access_token(NOW)
         self.assertEqual("oauth_refresh_expiry_warning", events[0][0])
         self.assertNotIn("access_token", events[0][1])
+
+    def test_production_logger_emits_info_once_without_propagation(self):
+        logger = logging.getLogger("news_digest.test.production")
+        logger.handlers.clear()
+        with unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as output:
+            configure_production_logging(logger)
+            configure_production_logging(logger)
+            log_event(logger, "runtime_ready", access_token="secret", count=1)
+        self.assertEqual(1, len(logger.handlers))
+        payload = json.loads(output.getvalue())
+        self.assertEqual("runtime_ready", payload["event"])
+        self.assertEqual("[REDACTED]", payload["access_token"])
+        self.assertFalse(logger.propagate)
 
 if __name__ == "__main__":
     unittest.main()

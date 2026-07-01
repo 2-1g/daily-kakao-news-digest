@@ -40,6 +40,8 @@ class VersionedTokenStore(Protocol):
     def verify(self, version: str) -> None: ...
     def compare_and_set_active(self, expected: str, new: str) -> bool: ...
     def mark_successful_use(self, version: str) -> None: ...
+    def rollback_if_unproven(self, candidate: str, previous: str) -> bool: ...
+    def unproven_previous(self, active: str) -> Optional[str]: ...
     def retire(self, version: str) -> None: ...
 
 
@@ -66,6 +68,21 @@ class OAuthManager:
         """Mark only after Kakao has accepted an authenticated request."""
         self._store.mark_successful_use(version)
 
+    def rollback_unproven(self, rotation: RotationResult) -> bool:
+        """CAS-rollback only the candidate created by this run.
+
+        Delivery is never retried here; the caller persists the failed dispatch
+        first and a later run remains blocked by the frozen edition state.
+        """
+        if rotation.previous_version is None:
+            return False
+        rolled_back = self._store.rollback_if_unproven(
+            rotation.active_version, rotation.previous_version)
+        self._event_sink("oauth_rotation_rollback", candidate=rotation.active_version,
+                         previous=rotation.previous_version,
+                         status="rolled_back" if rolled_back else "skipped")
+        return rolled_back
+
     def valid_access_token(self, now: Optional[datetime] = None) -> RotationResult:
         now = now or datetime.now(timezone.utc)
         active = self._store.active_version()
@@ -77,7 +94,9 @@ class OAuthManager:
                              expires_at=token.refresh_expires_at,
                              days_remaining=max(0, (token.refresh_expires_at - now).days))
         if not token.access_expiring(now):
-            return RotationResult(token, active)
+            context_reader = getattr(self._store, "unproven_previous", None)
+            previous = context_reader(active) if context_reader else None
+            return RotationResult(token, active, previous)
         try:
             refreshed = self._refresher.refresh(token.refresh_token)
         except ReauthorizationRequired:
@@ -99,7 +118,12 @@ class OAuthManager:
             self._phase(new_version, "cas_lost_retired", previous=active)
             winner = self._store.active_version()
             return RotationResult(self._store.read(winner), winner)
-        self._phase(new_version, "active_pending_validation", previous=active)
+        try:
+            self._phase(new_version, "active_pending_validation", previous=active)
+        except Exception:
+            # Do not leave a newly active candidate without durable phase proof.
+            self._store.rollback_if_unproven(new_version, active)
+            raise
         # Prior version is intentionally retained; an operator/grace-period task retires it.
         return RotationResult(refreshed, new_version, active)
 
@@ -138,6 +162,27 @@ class InMemoryTokenStore:
 
     def mark_successful_use(self, version: str) -> None:
         self.successful.add(version)
+        phase = self.rotation_phases.get(version)
+        details = phase[1] if phase else {}
+        self.record_rotation_phase(version, "successful_use", details)
+
+    def rollback_if_unproven(self, candidate: str, previous: str) -> bool:
+        phase = self.rotation_phases.get(candidate)
+        if (self.active != candidate or candidate in self.successful or
+                previous not in self.versions or previous in self.retired):
+            return False
+        self.active = previous
+        details = dict(phase[1] if phase else {})
+        details["previous"] = previous
+        self.record_rotation_phase(candidate, "rolled_back", details)
+        return True
+
+    def unproven_previous(self, active: str) -> Optional[str]:
+        phase = self.rotation_phases.get(active)
+        if active in self.successful or not phase:
+            return None
+        previous = phase[1].get("previous")
+        return previous if previous and previous != active else None
 
     def retire(self, version: str) -> None:
         if version == self.active:

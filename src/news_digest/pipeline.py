@@ -69,6 +69,11 @@ class DigestPipeline:
                 # Delivery has begun, so even a definite rejection is terminal for this
                 # frozen edition. Record a blocking state rather than leaving stale pending.
                 self.store.resolve(run_date, owner, envelope.position, DeliveryStatus.REJECTED, self.clock())
+                # A first authenticated-use rejection cannot prove a newly
+                # rotated token. Roll back its pointer, but never resend this
+                # message: the durable REJECTED edition remains terminal.
+                if not authenticated:
+                    self.oauth.rollback_unproven(rotation)
                 self.event_sink("digest_delivery_status", status="failed",
                                 edition_id=edition.edition_id, position=envelope.position)
                 return RunResult("terminal_delivery_failure", sent, digest)

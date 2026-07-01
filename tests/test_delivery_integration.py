@@ -260,6 +260,35 @@ class OAuthRotationIntegrationTests(unittest.TestCase):
         self.assertEqual("acknowledged", app.run("one", ["accepted"]).status)
         self.assertEqual(["accepted"], transport.sent)
 
+    def test_first_rejection_rolls_back_new_unproven_token_without_resend(self):
+        store = InMemoryTokenStore(token(expired=True))
+        transport = Transport([DefiniteDeliveryError("auth rejected")])
+        app = DigestPipeline(InMemoryEditionStore(),
+                             OAuthManager(store, Refresher(token(refresh="new"))),
+                             KakaoClient(transport), Clock())
+        result = app.run("one", ["first", "second"])
+        self.assertEqual("terminal_delivery_failure", result.status)
+        self.assertEqual("1", store.active_version())
+        self.assertEqual("rolled_back", store.rotation_phases["2"][0])
+        self.assertEqual(["first"], transport.sent)
+
+    def test_rejection_does_not_rollback_already_proven_rotation(self):
+        store = InMemoryTokenStore(token(expired=True))
+        manager = OAuthManager(store, Refresher(token(refresh="new")))
+        rotation = manager.valid_access_token(NOW)
+        manager.mark_successful_use(rotation.active_version)
+        self.assertFalse(manager.rollback_unproven(rotation))
+        self.assertEqual("2", store.active_version())
+
+    def test_restart_recovers_unproven_rotation_context_for_rollback(self):
+        store = InMemoryTokenStore(token(expired=True))
+        OAuthManager(store, Refresher(token(refresh="new"))).valid_access_token(NOW)
+        restarted = OAuthManager(store, Refresher(error=AssertionError("no refresh")))
+        recovered = restarted.valid_access_token(NOW)
+        self.assertEqual("1", recovered.previous_version)
+        self.assertTrue(restarted.rollback_unproven(recovered))
+        self.assertEqual("1", store.active_version())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,7 +24,7 @@ from .sources import GdeltAdapter, NaverAdapter
 from .summarize import summarize
 from .model_summarizer import BudgetedModelSummarizer, OpenAIResponsesClient, prices_from_json
 from .operator import authorization_url, bootstrap_token, reconcile_delivery
-from .logging import log_event
+from .logging import configure_production_logging, log_event
 from .state import kst_run_date
 
 
@@ -79,7 +79,7 @@ def collect_and_compose(emit=None) -> List[str]:
 
 def run_cloud() -> int:
     started = time.monotonic()
-    logger = logging.getLogger("news_digest")
+    logger = configure_production_logging(logging.getLogger("news_digest"))
 
     def emit(event, **fields):
         log_event(logger, event, **fields)

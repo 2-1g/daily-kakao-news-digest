@@ -85,15 +85,80 @@ class SecretManagerTokenStore:
             raise
         return True
 
+    @staticmethod
+    def _is_conflict(exc: Exception) -> bool:
+        return exc.__class__.__name__ in ("Aborted", "FailedPrecondition", "Conflict")
+
+    def _update_rotation_aliases(self, updates: Dict[str, str],
+                                 expected_active: str = "") -> bool:
+        """Persist phase metadata in Secret Manager aliases with etag CAS."""
+        secret = self.client.get_secret(request={"name": self.parent})
+        aliases = dict(getattr(secret, "version_aliases", {}))
+        if expected_active and str(aliases.get(self.active_alias)) != str(expected_active):
+            return False
+        if (self.client.__class__.__module__.startswith("google.") and
+                not getattr(secret, "etag", None)):
+            raise RuntimeError("Secret Manager CAS requires a resource etag")
+        for name, version in updates.items():
+            aliases[name] = int(version)
+        secret.version_aliases = aliases
+        try:
+            self.client.update_secret(request={"secret": secret,
+                                               "update_mask": {"paths": ["version_aliases"]}})
+        except Exception as exc:
+            if self._is_conflict(exc):
+                return False
+            raise
+        return True
+
     def record_rotation_phase(self, version: str, phase: str,
                               details: Dict[str, str]) -> None:
-        # The active alias is the durable phase boundary. Phase events belong in
-        # Cloud Logging rather than secret payload metadata.
-        return None
+        aliases = {"rotation-" + phase.replace("_", "-"): version,
+                   "rotation-candidate": version}
+        previous = details.get("previous")
+        if previous:
+            aliases["rotation-previous"] = previous
+        if not self._update_rotation_aliases(aliases):
+            raise RuntimeError("rotation phase metadata update conflicted")
 
     def mark_successful_use(self, version: str) -> None:
-        # Successful use is operational evidence; Cloud Logging records it. No secret mutation.
         self.verify(version)
+        if not self._update_rotation_aliases({"rotation-proven": version},
+                                             expected_active=version):
+            raise RuntimeError("active token changed before success proof")
+
+    def rollback_if_unproven(self, candidate: str, previous: str) -> bool:
+        """Atomically restore the retained prior version if candidate is unproved."""
+        secret = self.client.get_secret(request={"name": self.parent})
+        aliases = dict(getattr(secret, "version_aliases", {}))
+        if (str(aliases.get(self.active_alias)) != str(candidate) or
+                str(aliases.get("rotation-previous")) != str(previous) or
+                str(aliases.get("rotation-proven")) == str(candidate)):
+            return False
+        if (self.client.__class__.__module__.startswith("google.") and
+                not getattr(secret, "etag", None)):
+            raise RuntimeError("Secret Manager CAS requires a resource etag")
+        aliases[self.active_alias] = int(previous)
+        aliases["rotation-rolled-back"] = int(candidate)
+        secret.version_aliases = aliases
+        try:
+            self.client.update_secret(request={"secret": secret,
+                                               "update_mask": {"paths": ["version_aliases"]}})
+        except Exception as exc:
+            if self._is_conflict(exc):
+                return False
+            raise
+        return True
+
+    def unproven_previous(self, active: str) -> Any:
+        """Recover rotation context after process restart from durable aliases."""
+        secret = self.client.get_secret(request={"name": self.parent})
+        aliases = dict(getattr(secret, "version_aliases", {}))
+        if (str(aliases.get("rotation-candidate")) != str(active) or
+                str(aliases.get("rotation-proven")) == str(active)):
+            return None
+        previous = aliases.get("rotation-previous")
+        return str(previous) if previous is not None and str(previous) != str(active) else None
 
     def retire(self, version: str) -> None:
         self.client.disable_secret_version(

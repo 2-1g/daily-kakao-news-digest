@@ -36,3 +36,11 @@ version enabled until this validation is visible, so an operator can roll the al
 
 The `oauth_refresh_expiry_warning` structured event is emitted within seven days of
 refresh-token expiry. Alert on it and repeat attended authorization before expiry.
+
+Secret Manager aliases provide the durable audit markers: `rotation-candidate`,
+`rotation-previous`, phase-specific `rotation-*` markers, and `rotation-proven`.
+The first Kakao acceptance writes `rotation-proven`. If the first authenticated
+request is definitely rejected before that proof, the runtime atomically restores
+`active` to `rotation-previous` using the secret etag and records
+`rotation-rolled-back`. The rejected edition remains terminal and is never resent.
+An etag conflict means another worker won; the runtime does not overwrite it.
