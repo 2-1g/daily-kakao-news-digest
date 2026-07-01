@@ -193,7 +193,7 @@ class GroundingTests(unittest.TestCase):
 
     def test_valid_synthesis_preserves_analysis_label_and_rejects_advice(self):
         valid = json.dumps({"headline": "요약", "clauses": [
-            {"text": "정책 영향은 제한적일 수 있습니다.", "evidence_ids": ["E1"], "analysis": True},
+            {"text": "grounded 핵심 경제 정책 변화", "evidence_ids": ["E1"], "analysis": True},
         ]})
         self.assertTrue(parse_synthesis(self.cluster, valid).clauses[0].analysis)
         advice = json.dumps({"headline": "요약", "clauses": [
@@ -209,6 +209,50 @@ class GroundingTests(unittest.TestCase):
         }]})
         with self.assertRaises(ValueError):
             parse_synthesis(self.cluster, invented)
+
+    def _cluster_with_evidence(self, text):
+        candidate = ArticleCandidate(
+            "fixture", "evidence.kr", "검증 뉴스", "https://evidence.kr/item",
+            NOW, snippet=text, language="ko", region="domestic",
+        )
+        return EventCluster("hostile", (candidate,), ("evidence.kr",))
+
+    def _parse_clause(self, evidence, claim, *, analysis=False):
+        payload = json.dumps({"headline": "요약", "clauses": [{
+            "text": claim, "evidence_ids": ["E1"], "analysis": analysis,
+        }]})
+        return parse_synthesis(self._cluster_with_evidence(evidence), payload)
+
+    def test_near_extractive_particle_paraphrase_is_accepted(self):
+        result = self._parse_clause(
+            "한국은행은 기준금리를 3.5%로 동결했다.",
+            "한국은행이 기준금리를 3.5%로 동결했다.",
+        )
+        self.assertEqual("한국은행이 기준금리를 3.5%로 동결했다.", result.clauses[0].text)
+
+    def test_negation_cannot_be_added_or_removed(self):
+        for evidence, claim in (
+            ("정부는 세금을 인상하지 않았다.", "정부는 세금을 인상했다."),
+            ("정부는 세금을 인상했다.", "정부는 세금을 인상하지 않았다."),
+        ):
+            with self.subTest(evidence=evidence):
+                with self.assertRaises(ValueError):
+                    self._parse_clause(evidence, claim)
+
+    def test_number_or_entity_substitution_is_rejected(self):
+        cases = (
+            ("물가상승률은 2.1%다.", "물가상승률은 3.1%다."),
+            ("서울시가 청년 지원책을 발표했다.", "부산시가 청년 지원책을 발표했다."),
+        )
+        for evidence, claim in cases:
+            with self.subTest(claim=claim):
+                with self.assertRaises(ValueError):
+                    self._parse_clause(evidence, claim)
+
+    def test_analysis_flag_does_not_weaken_grounding(self):
+        with self.assertRaises(ValueError):
+            self._parse_clause("기준금리는 동결됐다.",
+                               "주가 상승 가능성이 크다.", analysis=True)
 
 
 class KakaoCompositionTests(unittest.TestCase):
