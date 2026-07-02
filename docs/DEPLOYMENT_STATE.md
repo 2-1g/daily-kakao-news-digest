@@ -31,7 +31,8 @@ duplicate protection rather than a scheduled-run failure.
   source. Add resilient backoff or another reviewed international source before
   promising a strict 60:40 split.
 - Source policies in `config/sources.yaml` expire on 2026-08-01. Re-check the
-  provider terms and update `reviewed_on` and `expires_on` before that date.
+  provider terms and update `reviewed_on` and `expires_on` before that date. The
+  daily briefing automatically includes a Kakao D-7 reminder on 2026-07-25.
 - The deterministic summarizer may be less fluent than a model-based Korean
   synthesis, but it avoids additional model cost and API credentials.
 - Cloud Billing budget alerts notify; they do not automatically stop resources.

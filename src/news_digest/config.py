@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, FrozenSet, Iterable, Mapping
 
@@ -61,6 +61,17 @@ class ComplianceRegistry:
             raise ComplianceError("unknown source: %s" % source_id)
         policy.assert_usable(today, fields)
         return policy
+
+    def expiring_in(self, today: date, days: int) -> tuple[SourcePolicy, ...]:
+        """Return approved policies expiring exactly ``days`` after ``today``."""
+        if days < 0:
+            raise ValueError("days must be non-negative")
+        target = today + timedelta(days=days)
+        return tuple(sorted(
+            (policy for policy in self._policies.values()
+             if policy.approved and policy.expires_on == target),
+            key=lambda policy: policy.source_id,
+        ))
 
 
 def _required_text(raw: Mapping[str, object], name: str) -> str:

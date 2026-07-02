@@ -50,7 +50,7 @@ def collect_and_compose(emit=None) -> List[str]:
                                      os.environ.get("GDELT_QUERY", "politics economy society")))
     if not adapters:
         raise RuntimeError("no compliant source adapter configured")
-    today = datetime.now(timezone.utc).date()
+    today = kst_run_date(datetime.now(timezone.utc))
     articles = [article for adapter in adapters for article in adapter.collect(today)]
     eligible_clusters = cluster_articles(articles)
     eligible_publishers = {cluster.primary.publisher for cluster in eligible_clusters}
@@ -83,7 +83,24 @@ def collect_and_compose(emit=None) -> List[str]:
     if composed.insufficient_source_diversity and emit is not None:
         emit("digest_editorial_suppressed", status="suppressed",
              reason=composed.reason, message_count=0)
-    return list(composed.messages)
+    messages = list(composed.messages)
+    reminder = source_expiry_reminder(registry, today)
+    if reminder:
+        # Preserve Kakao's 18-message contract even on unusually large editions.
+        messages = messages[:17]
+        messages.append(reminder)
+    return messages
+
+
+def source_expiry_reminder(registry: ComplianceRegistry, today,
+                           lead_days: int = 7) -> str:
+    policies = registry.expiring_in(today, lead_days)
+    if not policies:
+        return ""
+    sources = ", ".join(policy.source_id for policy in policies)
+    expiry = policies[0].expires_on.isoformat()
+    return (f"⚠️ 뉴스 소스 승인 만료 D-{lead_days}\n{sources}\n"
+            f"만료일: {expiry}\n약관을 검토하고 승인 기한을 갱신해 주세요.")
 
 
 def run_cloud() -> int:

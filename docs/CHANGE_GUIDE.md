@@ -47,3 +47,9 @@ recently. Extending it does not itself cost money. To renew:
 4. Run source-policy and adapter tests, then deploy the updated image.
 
 Do not extend the date mechanically without reviewing the terms.
+
+The scheduled digest sends a D-7 Kakao reminder. Kakao's self-message API does
+not expose replies to this application, so replying in self-chat cannot approve
+or mutate configuration. In the current immutable-image deployment,
+`config/sources.yaml` is bundled into the container; a reviewed date change
+therefore requires a new image and Cloud Run Job deployment.

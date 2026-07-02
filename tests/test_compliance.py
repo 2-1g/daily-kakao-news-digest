@@ -21,6 +21,17 @@ def policy(**overrides):
 
 
 class ComplianceTests(unittest.TestCase):
+    def test_registry_finds_only_approved_policies_expiring_on_lead_date(self):
+        candidate = registry([
+            policy(id="later", expires_on="2026-08-02"),
+            policy(id="due", expires_on="2026-08-01"),
+            policy(id="disabled", approved=False, expires_on="2026-08-01"),
+        ])
+        self.assertEqual(
+            ["due"],
+            [item.source_id for item in candidate.expiring_in(date(2026, 7, 25), 7)],
+        )
+
     def test_repository_registry_approval_is_short_lived(self):
         path = Path(__file__).parents[1] / "config" / "sources.yaml"
         loaded = ComplianceRegistry.from_path(path)
