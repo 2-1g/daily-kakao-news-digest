@@ -1,7 +1,9 @@
 # Google Cloud deployment checklist
 
-This is a reviewable procedure, not evidence that deployment occurred. No cloud
-resource or live message is created by the repository checkout or test suite.
+This is the repeatable deployment procedure, not the authoritative record of
+the current environment. See [`../DEPLOYMENT_STATE.md`](../DEPLOYMENT_STATE.md)
+for sanitized production status. A repository checkout or test run never
+creates cloud resources or sends a live message by itself.
 
 ## 1. Local and project preflight
 
@@ -65,8 +67,10 @@ authorized self-message smoke test. Verify order, links, limits, acknowledgement
 and acknowledged rerun no-op. Restore `false` if any observation is ambiguous.
 
 An injected timeout/real ambiguous send must become `unknown`; never retry it.
-Follow [manual reconciliation](manual-reconciliation.md). This work has not
-performed a live smoke test, so unattended live enablement remains unverified.
+Follow [manual reconciliation](manual-reconciliation.md). Record completed
+smoke-test evidence in the private operator environment and update only its
+sanitized outcome in `DEPLOYMENT_STATE.md`; never commit tokens, account
+identifiers, or production logs.
 
 ## Runtime invariants and observability
 

@@ -6,12 +6,17 @@ editorial composition, conservative delivery state, and Google Cloud adapters.
 
 ## Current readiness
 
-Local payload validation and the automated tests are ready. **Unattended live
-operation is not ready out of the box:** source approvals are time-limited,
-operator OAuth still requires an attended consent, and no authorized live Kakao
-smoke test has run. Never enable live sending
-until the checklist in [`docs/runbooks/deployment.md`](docs/runbooks/deployment.md)
-is complete.
+The personal production deployment completed its authorized Kakao self-message
+smoke test and is scheduled for 08:00 Asia/Seoul. A fresh checkout remains safe
+and does not deploy or send anything by itself. See the sanitized
+[deployment state](docs/DEPLOYMENT_STATE.md) for the current operational status;
+never copy credentials or production logs into this public repository.
+
+Future maintainers should start with:
+
+- [project context](docs/PROJECT_CONTEXT.md)
+- [deployment state](docs/DEPLOYMENT_STATE.md)
+- [change guide](docs/CHANGE_GUIDE.md)
 
 ## Safety boundary
 
