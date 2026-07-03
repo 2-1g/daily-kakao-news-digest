@@ -24,6 +24,11 @@ invocation also succeeded using the official Cloud Run v2 job endpoint. A second
 deliberate same-day invocation was rejected by the edition lease, demonstrating
 duplicate protection rather than a scheduled-run failure.
 
+On 2026-07-03 the first scheduled delivery failed before any Kakao message was
+sent because the runtime could read the token but could not persist its refreshed
+version. The runtime IAM contract was corrected with a custom role scoped only
+to the Kakao token secret. No delivery outcome was ambiguous.
+
 ## Known limitations and follow-ups
 
 - Direct GDELT collection is disabled, so international breadth currently

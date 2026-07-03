@@ -11,6 +11,26 @@ class InfrastructureContractTests(unittest.TestCase):
         self.assertIn('schedule: "0 8 * * *"', manifest)
         self.assertIn("timeZone: Asia/Seoul", manifest)
         self.assertIn("retryCount: 0", manifest)
+        self.assertIn("https://run.googleapis.com/v2/projects/PROJECT_ID/", manifest)
+
+    def test_runtime_token_rotation_role_matches_refresh_protocol(self):
+        role = (ROOT / "infra/runtime-token-rotator-role.yaml").read_text(
+            encoding="utf-8")
+        for permission in (
+            "secretmanager.secrets.get",
+            "secretmanager.secrets.update",
+            "secretmanager.versions.access",
+            "secretmanager.versions.add",
+            "secretmanager.versions.disable",
+            "secretmanager.versions.get",
+        ):
+            self.assertIn("- " + permission, role)
+        self.assertNotIn("secretmanager.secrets.delete", role)
+        self.assertNotIn("secretmanager.versions.destroy", role)
+
+        contract = (ROOT / "infra/iam.md").read_text(encoding="utf-8")
+        self.assertIn("runtime-token-rotator-role.yaml", contract)
+        self.assertIn("Kakao token secret only", contract)
 
     def test_cloud_run_job_is_single_task_without_platform_retry(self):
         manifest = (ROOT / "infra/cloudrun-job.yaml").read_text(encoding="utf-8")

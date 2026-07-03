@@ -1,0 +1,10 @@
+title: News Digest Token Rotator
+description: Rotate only the versioned Kakao token secret bound to this role.
+stage: GA
+includedPermissions:
+  - secretmanager.secrets.get
+  - secretmanager.secrets.update
+  - secretmanager.versions.access
+  - secretmanager.versions.add
+  - secretmanager.versions.disable
+  - secretmanager.versions.get

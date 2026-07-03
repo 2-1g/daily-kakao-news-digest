@@ -6,7 +6,7 @@ attemptDeadline: 900s
 retryConfig:
   retryCount: 0
 httpTarget:
-  uri: https://REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/PROJECT_ID/jobs/daily-kakao-news-digest:run
+  uri: https://run.googleapis.com/v2/projects/PROJECT_ID/locations/REGION/jobs/daily-kakao-news-digest:run
   httpMethod: POST
   oauthToken:
     serviceAccountEmail: news-digest-scheduler@PROJECT_ID.iam.gserviceaccount.com
